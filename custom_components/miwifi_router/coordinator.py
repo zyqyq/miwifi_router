@@ -5,6 +5,26 @@ Polling tiers:
 - Tier 2 (devices): Full device list with details — 30s
 - Tier 3 (static): Hardware/firmware info — 5 min (cached in API client)
 
+Adaptive polling layer (tier 1 + tier 2, see adaptive.py):
+- Tier 1 cadence is decided by AdaptivePollingController from two cheap
+  signals that tier 1 already returns: WAN throughput (downspeed + upspeed)
+  and the merged device MAC set.
+- ``normal`` mode uses the configured ``scan_interval`` (legacy behaviour),
+  ``active`` mode uses ``active_scan_interval`` after a traffic burst or a
+  device join/leave, and ``idle`` mode uses ``idle_scan_interval`` once WAN
+  traffic has been quiet for N samples AND the device set has been stable for
+  a while.
+- The resulting interval is written back to ``self.update_interval`` at the
+  end of the update; Home Assistant reads that attribute when it schedules
+  the next refresh, so the new cadence applies to the very next poll.
+- Tier 2 backs off as well: while the last observed mode is ``idle`` the
+  device list is refreshed no more often than ``idle_scan_interval``, but a
+  changed online count still forces an immediate device-list poll in every
+  mode so device churn stays responsive.
+- Tier 3 keeps its fixed 300s cadence.
+- With ``adaptive_polling`` disabled the controller is pinned to ``normal``
+  and the polling behaviour is exactly the legacy fixed cadence.
+
 Re-authorization strategy (inspired by hass-miwifi):
 - _is_reauthorization flag: when any API call fails with auth error,
   set this flag so the next poll cycle will re-login first before
@@ -34,8 +54,24 @@ from homeassistant.helpers.update_coordinator import (
     UpdateFailed,
 )
 
+from .adaptive import AdaptiveConfig, AdaptivePollingController
 from .api import MiWiFiAPIClient, MiWiFiAuthError, MiWiFiConnectionError
-from .const import DEFAULT_DEVICE_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL, DOMAIN
+from .const import (
+    ADAPTIVE_ACTIVE_HOLD_SECONDS,
+    ADAPTIVE_ACTIVE_TRAFFIC_BPS,
+    ADAPTIVE_DEVICE_STABLE_SECONDS,
+    ADAPTIVE_IDLE_SAMPLES,
+    ADAPTIVE_IDLE_TRAFFIC_BPS,
+    ADAPTIVE_MAX_INTERVAL,
+    ADAPTIVE_MIN_DWELL_SECONDS,
+    ADAPTIVE_MIN_INTERVAL,
+    DEFAULT_ACTIVE_SCAN_INTERVAL,
+    DEFAULT_ADAPTIVE_POLLING,
+    DEFAULT_DEVICE_SCAN_INTERVAL,
+    DEFAULT_IDLE_SCAN_INTERVAL,
+    DEFAULT_SCAN_INTERVAL,
+    DOMAIN,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -174,6 +210,21 @@ def _format_speed(speed_bytes: float) -> str:
     return f"{speed_bytes:.0f} B/s"
 
 
+def _safe_int(value: Any, default: int = 0) -> int:
+    """Convert a router-reported value to int without ever raising.
+
+    Router firmware sometimes reports speeds as strings (or omits them
+    entirely), and the adaptive controller must never blow up an otherwise
+    successful poll because of that.
+    """
+    if isinstance(value, bool) or value is None:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+
+
 class MiWiFiCoordinator(DataUpdateCoordinator):
     """Coordinator with layered polling and re-authorization support.
 
@@ -190,6 +241,9 @@ class MiWiFiCoordinator(DataUpdateCoordinator):
         api: MiWiFiAPIClient,
         scan_interval: int = DEFAULT_SCAN_INTERVAL,
         device_scan_interval: int = DEFAULT_DEVICE_SCAN_INTERVAL,
+        adaptive_polling: bool = DEFAULT_ADAPTIVE_POLLING,
+        idle_scan_interval: int = DEFAULT_IDLE_SCAN_INTERVAL,
+        active_scan_interval: int = DEFAULT_ACTIVE_SCAN_INTERVAL,
     ) -> None:
         super().__init__(
             hass,
@@ -211,6 +265,45 @@ class MiWiFiCoordinator(DataUpdateCoordinator):
         # Auth failure counter for graceful degradation
         self._auth_failures: int = 0
 
+        # Adaptive polling controller (tier 1 + tier 2 cadence).
+        # The user-facing intervals are pre-clamped here so that even a
+        # nonsensical option (active > base, idle < base) degrades into the
+        # legacy cadence instead of producing a tight poll loop.
+        self._adaptive_polling = adaptive_polling
+        self._idle_scan_interval = max(
+            _safe_int(idle_scan_interval, DEFAULT_IDLE_SCAN_INTERVAL),
+            _safe_int(scan_interval, DEFAULT_SCAN_INTERVAL),
+            ADAPTIVE_MIN_INTERVAL,
+        )
+        self._active_scan_interval = min(
+            max(
+                _safe_int(active_scan_interval, DEFAULT_ACTIVE_SCAN_INTERVAL),
+                ADAPTIVE_MIN_INTERVAL,
+            ),
+            _safe_int(scan_interval, DEFAULT_SCAN_INTERVAL),
+        )
+        self._adaptive = AdaptivePollingController(
+            AdaptiveConfig(
+                enabled=bool(adaptive_polling),
+                base_interval=_safe_int(scan_interval, DEFAULT_SCAN_INTERVAL),
+                idle_interval=self._idle_scan_interval,
+                active_interval=self._active_scan_interval,
+                idle_traffic_bps=ADAPTIVE_IDLE_TRAFFIC_BPS,
+                active_traffic_bps=ADAPTIVE_ACTIVE_TRAFFIC_BPS,
+                idle_samples=ADAPTIVE_IDLE_SAMPLES,
+                active_hold_s=ADAPTIVE_ACTIVE_HOLD_SECONDS,
+                min_dwell_s=ADAPTIVE_MIN_DWELL_SECONDS,
+                device_stable_s=ADAPTIVE_DEVICE_STABLE_SECONDS,
+                max_interval=ADAPTIVE_MAX_INTERVAL,
+                min_interval=ADAPTIVE_MIN_INTERVAL,
+            )
+        )
+        # Last cadence applied to update_interval; used for debug logging.
+        self._last_applied_interval: int = _safe_int(
+            scan_interval, DEFAULT_SCAN_INTERVAL
+        )
+        self._last_adaptive_mode: str = "normal"
+
     @property
     def api(self) -> MiWiFiAPIClient:
         """Return the API client."""
@@ -220,6 +313,16 @@ class MiWiFiCoordinator(DataUpdateCoordinator):
     def router_data(self) -> MiWiFiRouterData:
         """Return the router data container."""
         return self._data
+
+    @property
+    def adaptive_status(self) -> dict[str, Any]:
+        """Return the adaptive polling state as a JSON-serialisable dict."""
+        return self._adaptive.snapshot.as_dict()
+
+    @property
+    def adaptive_polling_enabled(self) -> bool:
+        """Return whether adaptive polling is enabled for this coordinator."""
+        return self._adaptive_polling
 
     async def _async_update_data(self) -> MiWiFiRouterData:
         """Fetch data from the router using layered polling strategy.
@@ -255,10 +358,16 @@ class MiWiFiCoordinator(DataUpdateCoordinator):
             self._data.status = await self._api.get_status()
 
             # ---- Tier 2: Poll device list at lower frequency ----
+            # Back off further while the adaptive layer is sleeping in idle
+            # mode, but never faster than the configured device interval.
+            device_interval = max(self._device_scan_interval, self._scan_interval)
+            if self._adaptive.snapshot.mode == "idle":
+                device_interval = max(device_interval, self._idle_scan_interval)
+
             count_changed = self._data.has_online_count_changed()
             device_poll_due = (
                 now - self._last_device_poll
-            ) >= self._device_scan_interval
+            ) >= device_interval
 
             if device_poll_due or count_changed:
                 if count_changed:
@@ -281,7 +390,37 @@ class MiWiFiCoordinator(DataUpdateCoordinator):
                     _LOGGER.debug("Init info poll failed: %s", err)
 
             # ---- Merge device data ----
-            self._data.get_merged_devices()
+            merged_devices = self._data.get_merged_devices()
+
+            # ---- Adaptive polling: decide the tier-1 cadence ----
+            # WAN throughput is the sum of both directions in bytes/second.
+            wan = self._data.status.get("wan", {}) or {}
+            wan_bps = _safe_int(wan.get("downspeed")) + _safe_int(wan.get("upspeed"))
+            previous_interval = self._last_applied_interval
+            previous_mode = self._last_adaptive_mode
+            snap = self._adaptive.update(
+                wan_bps=wan_bps,
+                online_count=self._data.get_online_count(),
+                device_macs=merged_devices.keys(),
+            )
+            # HA reads `update_interval` when it schedules the next refresh, so
+            # applying the new cadence at the very end of the update is correct.
+            self.update_interval = timedelta(seconds=snap.interval)
+            if snap.interval != previous_interval or snap.mode != previous_mode:
+                _LOGGER.debug(
+                    "Adaptive polling: mode %s -> %s, interval %ss -> %ss "
+                    "(reason=%s, wan=%s B/s, devices=%s, transitions=%s)",
+                    previous_mode,
+                    snap.mode,
+                    previous_interval,
+                    snap.interval,
+                    snap.reason,
+                    wan_bps,
+                    len(merged_devices),
+                    snap.transitions,
+                )
+            self._last_applied_interval = snap.interval
+            self._last_adaptive_mode = snap.mode
 
             # Success! Clear flags
             self._is_reauthorization = False

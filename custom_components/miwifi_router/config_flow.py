@@ -15,12 +15,18 @@ from homeassistant.helpers import config_validation as cv
 
 from .api import MiWiFiAPIClient, MiWiFiAuthError, MiWiFiConnectionError
 from .const import (
+    CONF_ACTIVE_SCAN_INTERVAL,
+    CONF_ADAPTIVE_POLLING,
     CONF_DEVICE_SCAN_INTERVAL,
     CONF_FORCE_HASH_ALGO,
+    CONF_IDLE_SCAN_INTERVAL,
     CONF_SPEED_UNIT,
     CONF_TOTAL_UNIT,
     CONF_TRACKED_DEVICES,
+    DEFAULT_ACTIVE_SCAN_INTERVAL,
+    DEFAULT_ADAPTIVE_POLLING,
     DEFAULT_DEVICE_SCAN_INTERVAL,
+    DEFAULT_IDLE_SCAN_INTERVAL,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     SPEED_UNIT_AUTO,
@@ -44,6 +50,9 @@ class MiWiFiRouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._password: str = ""
         self._scan_interval: int = DEFAULT_SCAN_INTERVAL
         self._device_scan_interval: int = DEFAULT_DEVICE_SCAN_INTERVAL
+        self._adaptive_polling: bool = DEFAULT_ADAPTIVE_POLLING
+        self._idle_scan_interval: int = DEFAULT_IDLE_SCAN_INTERVAL
+        self._active_scan_interval: int = DEFAULT_ACTIVE_SCAN_INTERVAL
         self._device_names: dict[str, str] = {}
         self._device_options: dict[str, str] = {}
         self._force_hash_algo: str | None = None
@@ -71,6 +80,15 @@ class MiWiFiRouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             device_scan_interval = user_input.get(
                 CONF_DEVICE_SCAN_INTERVAL, DEFAULT_DEVICE_SCAN_INTERVAL
             )
+            adaptive_polling = user_input.get(
+                CONF_ADAPTIVE_POLLING, DEFAULT_ADAPTIVE_POLLING
+            )
+            idle_scan_interval = user_input.get(
+                CONF_IDLE_SCAN_INTERVAL, DEFAULT_IDLE_SCAN_INTERVAL
+            )
+            active_scan_interval = user_input.get(
+                CONF_ACTIVE_SCAN_INTERVAL, DEFAULT_ACTIVE_SCAN_INTERVAL
+            )
             force_hash_algo = user_input.get(CONF_FORCE_HASH_ALGO) or None
             speed_unit = user_input.get(CONF_SPEED_UNIT, SPEED_UNIT_AUTO) or SPEED_UNIT_AUTO
             total_unit = user_input.get(CONF_TOTAL_UNIT, TOTAL_UNIT_AUTO) or TOTAL_UNIT_AUTO
@@ -91,6 +109,9 @@ class MiWiFiRouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._password = password
                 self._scan_interval = scan_interval
                 self._device_scan_interval = device_scan_interval
+                self._adaptive_polling = adaptive_polling
+                self._idle_scan_interval = idle_scan_interval
+                self._active_scan_interval = active_scan_interval
                 self._force_hash_algo = force_hash_algo
                 self._speed_unit = speed_unit
                 self._total_unit = total_unit
@@ -146,6 +167,15 @@ class MiWiFiRouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ): int,
                 vol.Optional(
                     CONF_DEVICE_SCAN_INTERVAL, default=DEFAULT_DEVICE_SCAN_INTERVAL
+                ): int,
+                vol.Optional(
+                    CONF_ADAPTIVE_POLLING, default=DEFAULT_ADAPTIVE_POLLING
+                ): bool,
+                vol.Optional(
+                    CONF_IDLE_SCAN_INTERVAL, default=DEFAULT_IDLE_SCAN_INTERVAL
+                ): int,
+                vol.Optional(
+                    CONF_ACTIVE_SCAN_INTERVAL, default=DEFAULT_ACTIVE_SCAN_INTERVAL
                 ): int,
                 vol.Optional(
                     CONF_FORCE_HASH_ALGO, default=""
@@ -207,6 +237,9 @@ class MiWiFiRouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             options={
                 CONF_SCAN_INTERVAL: self._scan_interval,
                 CONF_DEVICE_SCAN_INTERVAL: self._device_scan_interval,
+                CONF_ADAPTIVE_POLLING: self._adaptive_polling,
+                CONF_IDLE_SCAN_INTERVAL: self._idle_scan_interval,
+                CONF_ACTIVE_SCAN_INTERVAL: self._active_scan_interval,
                 CONF_TRACKED_DEVICES: tracked_devices,
                 CONF_FORCE_HASH_ALGO: self._force_hash_algo or "",
                 CONF_SPEED_UNIT: self._speed_unit,
@@ -248,6 +281,15 @@ class MiWiFiRouterOptionsFlow(config_entries.OptionsFlow):
                 ),
                 CONF_DEVICE_SCAN_INTERVAL: user_input.get(
                     CONF_DEVICE_SCAN_INTERVAL, DEFAULT_DEVICE_SCAN_INTERVAL
+                ),
+                CONF_ADAPTIVE_POLLING: user_input.get(
+                    CONF_ADAPTIVE_POLLING, DEFAULT_ADAPTIVE_POLLING
+                ),
+                CONF_IDLE_SCAN_INTERVAL: user_input.get(
+                    CONF_IDLE_SCAN_INTERVAL, DEFAULT_IDLE_SCAN_INTERVAL
+                ),
+                CONF_ACTIVE_SCAN_INTERVAL: user_input.get(
+                    CONF_ACTIVE_SCAN_INTERVAL, DEFAULT_ACTIVE_SCAN_INTERVAL
                 ),
                 CONF_TRACKED_DEVICES: tracked_devices,
                 CONF_FORCE_HASH_ALGO: user_input.get(CONF_FORCE_HASH_ALGO, "") or "",
@@ -313,6 +355,24 @@ class MiWiFiRouterOptionsFlow(config_entries.OptionsFlow):
                 CONF_DEVICE_SCAN_INTERVAL,
                 default=self._config_entry.options.get(
                     CONF_DEVICE_SCAN_INTERVAL, DEFAULT_DEVICE_SCAN_INTERVAL
+                ),
+            ): int,
+            vol.Optional(
+                CONF_ADAPTIVE_POLLING,
+                default=self._config_entry.options.get(
+                    CONF_ADAPTIVE_POLLING, DEFAULT_ADAPTIVE_POLLING
+                ),
+            ): bool,
+            vol.Optional(
+                CONF_IDLE_SCAN_INTERVAL,
+                default=self._config_entry.options.get(
+                    CONF_IDLE_SCAN_INTERVAL, DEFAULT_IDLE_SCAN_INTERVAL
+                ),
+            ): int,
+            vol.Optional(
+                CONF_ACTIVE_SCAN_INTERVAL,
+                default=self._config_entry.options.get(
+                    CONF_ACTIVE_SCAN_INTERVAL, DEFAULT_ACTIVE_SCAN_INTERVAL
                 ),
             ): int,
             vol.Optional(

@@ -9,6 +9,9 @@
           "password": "Router admin password",
           "scan_interval": "Realtime data polling interval (seconds, default 10)",
           "device_scan_interval": "Device list polling interval (seconds, default 30)",
+          "adaptive_polling": "Adaptive polling (adjust polling interval automatically)",
+          "idle_scan_interval": "Idle polling interval (seconds)",
+          "active_scan_interval": "Traffic burst polling interval (seconds)",
           "force_hash_algo": "Password hash algorithm (Auto-detect is recommended; manually specify only if login fails)",
           "speed_unit": "Realtime speed sensor unit (Auto = B/s, no conversion)",
           "total_unit": "Total traffic sensor unit (Auto = B, no conversion)"
@@ -39,6 +42,9 @@
         "data": {
           "scan_interval": "Realtime data polling interval (seconds)",
           "device_scan_interval": "Device list polling interval (seconds)",
+          "adaptive_polling": "Adaptive polling (adjust polling interval automatically)",
+          "idle_scan_interval": "Idle polling interval (seconds)",
+          "active_scan_interval": "Traffic burst polling interval (seconds)",
           "tracked_devices": "Devices to add sensors for",
           "force_hash_algo": "Password hash algorithm (Auto-detect is recommended; manually specify only if login fails)",
           "speed_unit": "Realtime speed sensor unit (history data will be lost if changed)",
