@@ -82,12 +82,40 @@ _LOGGER = logging.getLogger(__name__)
 NATIVE_RATE_UNIT = UnitOfDataRate.BYTES_PER_SECOND  # "B/s"
 NATIVE_SIZE_UNIT = UnitOfInformation.BYTES  # "B"
 
-# ``suggested_unit_of_measurement`` was added to SensorEntityDescription in a
-# later Home Assistant release. Guard for compatibility so the integration
-# still loads (with raw byte units) on older cores.
-_HAS_SUGGESTED_UNIT = "suggested_unit_of_measurement" in getattr(
-    SensorEntityDescription, "__dataclass_fields__", {}
-)
+def _supports_suggested_unit() -> bool:
+    """Return whether this Home Assistant accepts ``suggested_unit_of_measurement``.
+
+    Version sniffing is not reliable here: HA's ``SensorEntityDescription`` is
+    implemented with a custom class factory, so ``dataclasses.fields()`` /
+    ``__dataclass_fields__`` do *not* expose the fields (verified on HA
+    2026.9.4, where ``__dataclass_fields__`` is missing even though the field
+    exists). Probing the actual capability — "can I construct a description with
+    that keyword?" — is therefore the only dependable check.
+    """
+    try:
+        SensorEntityDescription(
+            key="_suggested_unit_probe",
+            suggested_unit_of_measurement=UnitOfDataRate.BYTES_PER_SECOND,
+        )
+    except TypeError:
+        return False
+    return True
+
+
+# ``suggested_unit_of_measurement`` lets Home Assistant perform the native →
+# display conversion itself. When it is unavailable (very old cores) the sensor
+# platform falls back to the legacy behaviour of baking the display unit into
+# the native unit.
+_HAS_SUGGESTED_UNIT = _supports_suggested_unit()
+
+# Display units live in the entity registry, keyed by the *sensor component*
+# domain ("sensor"), not by this integration's domain:
+#   options["sensor"]["unit_of_measurement"]                    -> user's choice
+#   options["sensor.private"]["suggested_unit_of_measurement"]  -> our suggestion
+# Home Assistant never refreshes the latter on its own, so the integration keeps
+# it in sync (see _ByteUnitSensorMixin._sync_display_unit_to_registry).
+_SENSOR_PRIVATE_OPTIONS_DOMAIN = "sensor.private"
+_SUGGESTED_UNIT_KEY = "suggested_unit_of_measurement"
 
 # Map of top-level byte-based sensors to their /api/misystem/status WAN field.
 _UNIT_SENSOR_FIELDS: dict[str, str] = {
@@ -539,6 +567,59 @@ class _ByteUnitSensorMixin:
 
     _resolver: _UnitResolver
 
+    async def async_added_to_hass(self) -> None:
+        """Register the configured display unit with Home Assistant."""
+        await super().async_added_to_hass()
+        self._sync_display_unit_to_registry()
+
+    @callback
+    def _display_unit(self) -> str | None:
+        """Return the display unit that should be used for this entity."""
+        resolver = getattr(self, "_resolver", None)
+        return resolver.display_unit if resolver is not None else None
+
+    @callback
+    def _sync_display_unit_to_registry(self) -> None:
+        """Store the configured display unit in the entity registry.
+
+        Home Assistant resolves a sensor's display unit as: the unit the user
+        picked in the entity settings (``options["sensor"]["unit_of_measurement"]``)
+        → the unit suggested for the entity
+        (``options["sensor.private"]["suggested_unit_of_measurement"]``) → the
+        native unit. It writes that ``sensor.private`` entry by itself only while
+        the entity is added for the very first time, and never refreshes it
+        afterwards — so a plain config-entry reload would silently keep showing
+        the unit that was configured when the entity was created, making the
+        unit options (and the runtime auto-scaling) inert. That is exactly the
+        failure mode behind the v1.3.11 → v1.3.14 revert in this integration.
+
+        Keeping the registry copy in sync is a pure *display* change: the
+        entity, its state history and its long-term statistics (recorded in raw
+        bytes) are never touched, and no entity is removed or re-created. A unit
+        chosen by hand in the entity settings always wins, because Home Assistant
+        reads ``options["sensor"]["unit_of_measurement"]`` first.
+        """
+        unit = self._display_unit()
+        if unit is None:
+            return
+        registry = async_get_entity_registry(self.hass)
+        entry = registry.async_get(self.entity_id)
+        if entry is None:
+            return
+        private = dict(entry.options.get(_SENSOR_PRIVATE_OPTIONS_DOMAIN) or {})
+        if private.get(_SUGGESTED_UNIT_KEY) == unit:
+            return
+        private[_SUGGESTED_UNIT_KEY] = unit
+        _LOGGER.debug(
+            "Display unit of %s set to %s via the entity registry "
+            "(no entity re-creation, history untouched)",
+            self.entity_id,
+            unit,
+        )
+        registry.async_update_entity_options(
+            self.entity_id, _SENSOR_PRIVATE_OPTIONS_DOMAIN, private
+        )
+
     def _apply_unit_value(
         self, raw_value: Any, extra_attributes: dict[str, Any] | None = None
     ) -> None:
@@ -555,6 +636,9 @@ class _ByteUnitSensorMixin:
         if _HAS_SUGGESTED_UNIT and display_unit is not None:
             # Publishes the new display unit; history/statistics are unaffected.
             self._attr_suggested_unit_of_measurement = display_unit
+            # Auto-scaling changes the unit at runtime; Home Assistant only
+            # re-renders it when the registry copy is in sync as well.
+            self._sync_display_unit_to_registry()
 
         attributes: dict[str, Any] = dict(extra_attributes or {})
         attributes["raw_b"] = raw
