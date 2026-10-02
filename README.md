@@ -119,6 +119,10 @@ MiWiFi 路由器登录密码的哈希算法因固件版本不同而异：
   `data_size`）并把用户选择的单位作为 `suggested_unit_of_measurement`，
   HA 负责换算与显示；你也可以在单个实体的设置里手动指定显示单位，
   HA 会自动换算全部历史数据。
+- 由于 HA 只会把"首次见到的单位"记进实体注册表且不再刷新，集成会在实体加载时
+  以及自动缩放切换单位时，把当前应显示的单位同步写入实体注册表
+  （`sensor.private.suggested_unit_of_measurement`）——这是纯显示层操作，
+  不会重建实体、不会影响状态历史与长期统计；你在单个实体里手选的单位仍然优先。
 - **单位制式** `unit_mode`：可选「字节」（B/s、MB/s、GB…）或「比特」
   （bit/s、Mbit/s、Gbit…）。切换制式只改变显示，不影响数据。
 - **实时速率自动适配**：`speed_unit = auto`（默认）时，速率传感器会根据最近
@@ -666,6 +670,10 @@ custom_components/miwifi_router/
   - 每个字节类传感器保留 `raw_b` / `human_readable`，新增 `display_unit` 属性
   - 移除「修改单位会丢失历史」确认步骤；`speed_top5` 保持无单位并新增 `display_value` / `display_unit`
   - 新增 `units.py` 纯标准库单位引擎（可脱离 HA 测试）
+  - 修复实机验证发现的两个缺陷：`suggested_unit_of_measurement` 支持性探测方式
+    （HA 2026.9 的 `SensorEntityDescription` 不是 dataclass，旧探测恒为假，导致自动
+    缩放从未生效）；显示单位被 HA 实体注册表"钉死"导致改配置后不生效（改由集成
+    同步注册表项，仍然不重建实体、不丢历史）
 
 ### v1.6.3
 - 设备传感器（per-device sensor）新增 `mac` 和 `ip` 属性，解决同名/泛用名设备无法辨识实体的问题
