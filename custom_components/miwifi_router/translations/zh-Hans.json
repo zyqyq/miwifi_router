@@ -83,6 +83,9 @@
       },
       "top5_speeds": {
         "name": "网速 TOP5"
+      },
+      "polling_mode": {
+        "name": "轮询模式"
       }
     },
     "button": {

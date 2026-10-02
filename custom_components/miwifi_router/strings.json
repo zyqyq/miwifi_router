@@ -80,6 +80,12 @@
       },
       "temperature": {
         "name": "Temperature"
+      },
+      "top5_speeds": {
+        "name": "Speed TOP5"
+      },
+      "polling_mode": {
+        "name": "Polling Mode"
       }
     }
   }

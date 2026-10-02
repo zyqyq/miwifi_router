@@ -50,6 +50,7 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     PERCENTAGE,
+    EntityCategory,
     UnitOfDataRate,
     UnitOfInformation,
     UnitOfTemperature,
@@ -464,6 +465,18 @@ async def async_setup_entry(
         )
 
     async_add_entities(entities)
+
+    # Adaptive polling diagnostics: exposes the mode/interval chosen by the
+    # adaptive layer (see adaptive.py) so the behaviour is observable in the UI.
+    async_add_entities(
+        [
+            MiWiFiPollingModeSensor(
+                coordinator=coordinator,
+                model=api.model,
+                firmware=api.firmware,
+            )
+        ]
+    )
 
     # Set up per-device sensors for tracked devices
     device_sensor_manager = MiWiFiDeviceSensorManager(
@@ -896,4 +909,69 @@ class MiWiFiDeviceSensor(
                     dev_data.get(_DEVICE_UNIT_FIELDS[key], 0), device_attrs
                 )
 
+        self.async_write_ha_state()
+
+
+class MiWiFiPollingModeSensor(
+    CoordinatorEntity[MiWiFiCoordinator], SensorEntity
+):
+    """Diagnostic sensor showing how the adaptive polling layer is behaving.
+
+    State: ``active`` / ``normal`` / ``idle`` (the mode chosen by
+    :mod:`adaptive`). Attributes expose the resulting poll interval together
+    with the configured bounds and the reason for the current mode, which makes
+    the adaptive behaviour observable without enabling debug logging.
+
+    The entity is a plain string sensor: it has no unit, no device class and no
+    state class, so it never takes part in long-term statistics.
+    """
+
+    _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        coordinator: MiWiFiCoordinator,
+        model: str,
+        firmware: str,
+    ) -> None:
+        """Initialize the adaptive polling diagnostic sensor."""
+        super().__init__(coordinator)
+        self._model = model
+        self._firmware = firmware
+        self.entity_description = SensorEntityDescription(
+            key="polling_mode",
+            translation_key="polling_mode",
+            icon="mdi:timer-cog-outline",
+            entity_category=EntityCategory.DIAGNOSTIC,
+        )
+        self._attr_unique_id = f"{coordinator.api._host}_polling_mode"
+        self._attr_extra_state_attributes: dict[str, Any] = {}
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        """Return device info for the router."""
+        return {
+            "identifiers": {(DOMAIN, self.coordinator.api._host)},
+            "name": self._model or "MiWiFi Router",
+            "manufacturer": "Xiaomi",
+            "model": self._model,
+            "sw_version": self._firmware,
+        }
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Publish the current adaptive polling state."""
+        status: dict[str, Any] = self.coordinator.adaptive_status or {}
+        self._attr_native_value = status.get("mode", "normal")
+        self._attr_extra_state_attributes = {
+            "adaptive_polling": self.coordinator.adaptive_polling_enabled,
+            "interval": status.get("interval"),
+            "base_interval": status.get("base_interval"),
+            "idle_interval": status.get("idle_interval"),
+            "active_interval": status.get("active_interval"),
+            "reason": status.get("reason"),
+            "idle_streak": status.get("idle_streak"),
+            "transitions": status.get("transitions"),
+        }
         self.async_write_ha_state()
