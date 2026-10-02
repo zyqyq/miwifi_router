@@ -70,7 +70,7 @@ class MiWiFiRebootButton(CoordinatorEntity[MiWiFiCoordinator], ButtonEntity):
         """Return device info for the router."""
         return {
             "identifiers": {(DOMAIN, self.coordinator.api._host)},
-            "name": self._model or "小米路由器",
+            "name": self._model or "MiWiFi Router",
             "manufacturer": "Xiaomi",
             "model": self._model,
             "sw_version": self._firmware,

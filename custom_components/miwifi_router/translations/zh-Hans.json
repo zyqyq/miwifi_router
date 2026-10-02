@@ -2,19 +2,19 @@
   "config": {
     "step": {
       "user": {
-        "title": "小米路由器 (MiWiFi)",
+        "title": "MiWiFi Router",
         "description": "设置小米 MiWiFi 路由器集成。\n\nℹ️ 网速/流量单位是显示单位，随时可在配置中修改：不会重建实体，也不会丢失历史数据。",
         "data": {
           "host": "路由器 IP 地址",
           "password": "路由器管理密码",
-          "scan_interval": "实时数据轮询间隔（秒，最小 5，默认 10）",
-          "device_scan_interval": "设备列表轮询间隔（秒，最小 5，默认 30）",
+          "scan_interval": "实时数据轮询间隔（秒，默认 10）",
+          "device_scan_interval": "设备列表轮询间隔（秒，默认 30）",
           "adaptive_polling": "自适应轮询（智能调节轮询间隔）",
-          "idle_scan_interval": "空闲模式轮询间隔（秒，最小 5，默认 60）",
-          "active_scan_interval": "流量突增模式轮询间隔（秒，最小 5，默认 5）",
+          "idle_scan_interval": "空闲轮询间隔（秒）",
+          "active_scan_interval": "流量突增轮询间隔（秒）",
           "force_hash_algo": "密码哈希算法（一般选「自动检测」即可，登录失败再手动指定）",
-          "speed_unit": "实时网速显示单位（单位制式为「自动」时按数值自动选择易读单位）",
-          "total_unit": "累计流量显示单位（单位制式为「自动」时按数值自动选择稳定单位）",
+          "speed_unit": "实时网速传感器显示单位（「自动」表示按数值自动选择易读单位）",
+          "total_unit": "累计流量传感器显示单位（「自动」表示按数值自动选择易读单位）",
           "speed_unit_mode": "实时网速单位制式（字节 / 比特）",
           "total_unit_mode": "累计流量单位制式（字节 / 比特）",
           "idle_traffic_kbps": "空闲判定阈值（KB/s）：速率低于该值算空闲，连续多次后进入空闲模式",
@@ -41,18 +41,18 @@
   "options": {
     "step": {
       "init": {
-        "title": "小米路由器配置",
+        "title": "MiWiFi Router 配置",
         "description": "调整轮询间隔，选择需添加传感器的设备。取消勾选的设备，其传感器会在重载后自动删除。\n\nℹ️ 网速/流量单位是显示单位，可随时修改：不会重建实体，也不会丢失历史数据与长期统计。",
         "data": {
-          "scan_interval": "实时数据轮询间隔（秒，最小 5，默认 10）",
-          "device_scan_interval": "设备列表轮询间隔（秒，最小 5，默认 30）",
+          "scan_interval": "实时数据轮询间隔（秒）",
+          "device_scan_interval": "设备列表轮询间隔（秒）",
           "adaptive_polling": "自适应轮询（智能调节轮询间隔）",
-          "idle_scan_interval": "空闲模式轮询间隔（秒，最小 5，默认 60）",
-          "active_scan_interval": "流量突增模式轮询间隔（秒，最小 5，默认 5）",
+          "idle_scan_interval": "空闲轮询间隔（秒）",
+          "active_scan_interval": "流量突增轮询间隔（秒）",
           "tracked_devices": "需添加传感器的设备",
           "force_hash_algo": "密码哈希算法（一般选「自动检测」即可，登录失败再手动指定）",
-          "speed_unit": "实时网速显示单位（单位制式为「自动」时按数值自动选择易读单位）",
-          "total_unit": "累计流量显示单位（单位制式为「自动」时按数值自动选择稳定单位）",
+          "speed_unit": "实时网速传感器显示单位（显示单位，修改不会丢失历史数据）",
+          "total_unit": "累计流量传感器显示单位（显示单位，修改不会丢失历史数据）",
           "speed_unit_mode": "实时网速单位制式（字节 / 比特）",
           "total_unit_mode": "累计流量单位制式（字节 / 比特）",
           "idle_traffic_kbps": "空闲判定阈值（KB/s）：速率低于该值算空闲，连续多次后进入空闲模式",

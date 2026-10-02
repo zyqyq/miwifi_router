@@ -17,7 +17,7 @@ CONF_TOTAL_UNIT = "total_unit"  # Optional: unit for total traffic sensors
 # readable unit automatically from the observed values.
 SPEED_UNIT_AUTO = "auto"
 SPEED_UNIT_OPTIONS: dict[str, str] = {
-    "auto": "自动（在所选制式内按数值自动选择易读单位）",
+    "auto": "自动（按数值自动选择易读单位，如 B/s、MB/s）",
     "B/s": "B/s（字节/秒）",
     "kB/s": "kB/s（千字节/秒，1000 进制）",
     "MB/s": "MB/s（兆字节/秒，1000 进制）",
@@ -36,7 +36,7 @@ SPEED_UNIT_OPTIONS: dict[str, str] = {
 # from the observed magnitude (totals keep that unit, they never switch).
 TOTAL_UNIT_AUTO = "auto"
 TOTAL_UNIT_OPTIONS: dict[str, str] = {
-    "auto": "自动（在所选制式内按数值选一个稳定的易读单位）",
+    "auto": "自动（按数值自动选择易读单位，如 B、GB）",
     "B": "B（字节）",
     "kB": "kB（千字节，1000 进制）",
     "MB": "MB（兆字节，1000 进制）",

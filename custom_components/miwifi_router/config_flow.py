@@ -51,7 +51,7 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 #: Display name used for flow titles, config entry titles and device names.
-INTEGRATION_TITLE = "小米路由器 (MiWiFi)"
+INTEGRATION_TITLE = "MiWiFi Router"
 
 
 #: Interval fields are validated (not silently clamped) so the UI shows a

@@ -1,6 +1,6 @@
 {
   "domain": "miwifi_router",
-  "name": "小米路由器 (MiWiFi)",
+  "name": "MiWiFi Router",
   "codeowners": [],
   "config_flow": true,
   "documentation": "https://github.com/tiejiang29/miwifi_router",
