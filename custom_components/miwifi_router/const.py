@@ -166,3 +166,32 @@ SENSOR_TYPES = {
         "state_class": "measurement",
     },
 }
+
+# ---------------------------------------------------------------------------
+# Adaptive polling (implemented in adaptive.py)
+# ---------------------------------------------------------------------------
+# 自适应轮询：根据 WAN 流量与设备变化动态调整实时数据轮询间隔，
+# 空闲时拉长间隔降低路由器负载，流量突增/设备上下线时临时缩短间隔。
+# Adaptive polling: dynamically adjusts the tier-1 interval; long when the
+# network is quiet, short around traffic bursts and device churn.
+
+# Option keys (config flow / options flow)
+CONF_ADAPTIVE_POLLING = "adaptive_polling"          # 是否启用自适应轮询
+CONF_IDLE_SCAN_INTERVAL = "idle_scan_interval"      # 空闲模式轮询间隔（秒）
+CONF_ACTIVE_SCAN_INTERVAL = "active_scan_interval"  # 流量突增模式轮询间隔（秒）
+
+# Defaults
+DEFAULT_ADAPTIVE_POLLING = True
+DEFAULT_IDLE_SCAN_INTERVAL = 60
+DEFAULT_ACTIVE_SCAN_INTERVAL = 5
+
+# Hard limits and thresholds used by AdaptiveConfig
+ADAPTIVE_MIN_INTERVAL = 5                  # 任何模式下的最小轮询间隔（秒）
+ADAPTIVE_MAX_INTERVAL = 300                # 任何模式下的最大轮询间隔（秒）
+ADAPTIVE_IDLE_TRAFFIC_BPS = 1024           # ≤ 该值视为空闲采样（字节/秒）
+ADAPTIVE_ACTIVE_TRAFFIC_BPS = 32768        # ≥ 该值视为流量突增（字节/秒）
+ADAPTIVE_IDLE_SAMPLES = 6                  # 连续空闲采样次数后才进入空闲模式
+ADAPTIVE_ACTIVE_HOLD_SECONDS = 60          # 最后一次事件后保持活跃的秒数
+ADAPTIVE_MIN_DWELL_SECONDS = 15            # 模式降级前的最短驻留时间（秒）
+ADAPTIVE_DEVICE_STABLE_SECONDS = 300       # 设备集合需稳定的秒数才允许空闲
+
