@@ -16,11 +16,17 @@ from homeassistant.helpers.entity_registry import async_get as async_get_entity_
 
 from .api import MiWiFiAPIClient
 from .const import (
+    CONF_ACTIVE_SCAN_INTERVAL,
+    CONF_ADAPTIVE_POLLING,
     CONF_DEVICE_SCAN_INTERVAL,
     CONF_FORCE_HASH_ALGO,
+    CONF_IDLE_SCAN_INTERVAL,
     CONF_SPEED_UNIT,
     CONF_TOTAL_UNIT,
+    DEFAULT_ACTIVE_SCAN_INTERVAL,
+    DEFAULT_ADAPTIVE_POLLING,
     DEFAULT_DEVICE_SCAN_INTERVAL,
+    DEFAULT_IDLE_SCAN_INTERVAL,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     SPEED_UNIT_AUTO,
@@ -40,6 +46,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     scan_interval = entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
     device_scan_interval = entry.options.get(
         CONF_DEVICE_SCAN_INTERVAL, DEFAULT_DEVICE_SCAN_INTERVAL
+    )
+    adaptive_polling = entry.options.get(
+        CONF_ADAPTIVE_POLLING, DEFAULT_ADAPTIVE_POLLING
+    )
+    idle_scan_interval = entry.options.get(
+        CONF_IDLE_SCAN_INTERVAL, DEFAULT_IDLE_SCAN_INTERVAL
+    )
+    active_scan_interval = entry.options.get(
+        CONF_ACTIVE_SCAN_INTERVAL, DEFAULT_ACTIVE_SCAN_INTERVAL
     )
     force_hash_algo = entry.options.get(CONF_FORCE_HASH_ALGO) or None
     speed_unit = entry.options.get(CONF_SPEED_UNIT, SPEED_UNIT_AUTO)
@@ -64,6 +79,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         api=api,
         scan_interval=scan_interval,
         device_scan_interval=device_scan_interval,
+        adaptive_polling=adaptive_polling,
+        idle_scan_interval=idle_scan_interval,
+        active_scan_interval=active_scan_interval,
     )
 
     # Store in hass.data
@@ -81,10 +99,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     _LOGGER.info(
         "MiWiFi Router integration set up for %s (scan: %ds, device: %ds, "
+        "adaptive_polling: %s, idle: %ds, active: %ds, "
         "speed_unit: %s, total_unit: %s)",
         host,
         scan_interval,
         device_scan_interval,
+        adaptive_polling,
+        idle_scan_interval,
+        active_scan_interval,
         speed_unit,
         total_unit,
     )

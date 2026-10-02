@@ -9,6 +9,9 @@
           "password": "路由器管理密码",
           "scan_interval": "实时数据轮询间隔（秒，默认 10）",
           "device_scan_interval": "设备列表轮询间隔（秒，默认 30）",
+          "adaptive_polling": "自适应轮询（智能调节轮询间隔）",
+          "idle_scan_interval": "空闲轮询间隔（秒）",
+          "active_scan_interval": "流量突增轮询间隔（秒）",
           "force_hash_algo": "密码哈希算法（一般选「自动检测」即可，登录失败再手动指定）",
           "speed_unit": "实时网速传感器单位（「自动」表示用 B/s，不换算）",
           "total_unit": "累计流量传感器单位（「自动」表示用 B，不换算）"
@@ -39,6 +42,9 @@
         "data": {
           "scan_interval": "实时数据轮询间隔（秒）",
           "device_scan_interval": "设备列表轮询间隔（秒）",
+          "adaptive_polling": "自适应轮询（智能调节轮询间隔）",
+          "idle_scan_interval": "空闲轮询间隔（秒）",
+          "active_scan_interval": "流量突增轮询间隔（秒）",
           "tracked_devices": "需添加传感器的设备",
           "force_hash_algo": "密码哈希算法（一般选「自动检测」即可，登录失败再手动指定）",
           "speed_unit": "实时网速传感器单位（修改后历史数据会丢失）",
