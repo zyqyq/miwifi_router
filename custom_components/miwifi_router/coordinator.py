@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import time
 from datetime import timedelta
 from typing import Any
@@ -58,19 +59,20 @@ from .adaptive import AdaptiveConfig, AdaptivePollingController
 from .api import MiWiFiAPIClient, MiWiFiAuthError, MiWiFiConnectionError
 from .const import (
     ADAPTIVE_ACTIVE_HOLD_SECONDS,
-    ADAPTIVE_ACTIVE_TRAFFIC_BPS,
     ADAPTIVE_DEVICE_STABLE_SECONDS,
     ADAPTIVE_IDLE_SAMPLES,
-    ADAPTIVE_IDLE_TRAFFIC_BPS,
     ADAPTIVE_MAX_INTERVAL,
     ADAPTIVE_MIN_DWELL_SECONDS,
     ADAPTIVE_MIN_INTERVAL,
     DEFAULT_ACTIVE_SCAN_INTERVAL,
+    DEFAULT_ACTIVE_TRAFFIC_KBPS,
     DEFAULT_ADAPTIVE_POLLING,
     DEFAULT_DEVICE_SCAN_INTERVAL,
     DEFAULT_IDLE_SCAN_INTERVAL,
+    DEFAULT_IDLE_TRAFFIC_KBPS,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    KBPS_TO_BPS,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -225,6 +227,17 @@ def _safe_int(value: Any, default: int = 0) -> int:
         return default
 
 
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    """Convert a router/user value to float without ever raising."""
+    if isinstance(value, bool) or value is None:
+        return default
+    try:
+        result = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+    return result if math.isfinite(result) else default
+
+
 class MiWiFiCoordinator(DataUpdateCoordinator):
     """Coordinator with layered polling and re-authorization support.
 
@@ -244,6 +257,8 @@ class MiWiFiCoordinator(DataUpdateCoordinator):
         adaptive_polling: bool = DEFAULT_ADAPTIVE_POLLING,
         idle_scan_interval: int = DEFAULT_IDLE_SCAN_INTERVAL,
         active_scan_interval: int = DEFAULT_ACTIVE_SCAN_INTERVAL,
+        idle_traffic_kbps: float = DEFAULT_IDLE_TRAFFIC_KBPS,
+        active_traffic_kbps: float = DEFAULT_ACTIVE_TRAFFIC_KBPS,
     ) -> None:
         super().__init__(
             hass,
@@ -282,14 +297,27 @@ class MiWiFiCoordinator(DataUpdateCoordinator):
             ),
             _safe_int(scan_interval, DEFAULT_SCAN_INTERVAL),
         )
+        # Traffic thresholds are user-configurable in KB/s; keep the idle
+        # threshold at or below the active threshold so the state machine can
+        # never see an inverted pair.
+        self._idle_traffic_bps = max(
+            0, int(_safe_float(idle_traffic_kbps, DEFAULT_IDLE_TRAFFIC_KBPS) * KBPS_TO_BPS)
+        )
+        self._active_traffic_bps = max(
+            self._idle_traffic_bps,
+            int(
+                _safe_float(active_traffic_kbps, DEFAULT_ACTIVE_TRAFFIC_KBPS)
+                * KBPS_TO_BPS
+            ),
+        )
         self._adaptive = AdaptivePollingController(
             AdaptiveConfig(
                 enabled=bool(adaptive_polling),
                 base_interval=_safe_int(scan_interval, DEFAULT_SCAN_INTERVAL),
                 idle_interval=self._idle_scan_interval,
                 active_interval=self._active_scan_interval,
-                idle_traffic_bps=ADAPTIVE_IDLE_TRAFFIC_BPS,
-                active_traffic_bps=ADAPTIVE_ACTIVE_TRAFFIC_BPS,
+                idle_traffic_bps=self._idle_traffic_bps,
+                active_traffic_bps=self._active_traffic_bps,
                 idle_samples=ADAPTIVE_IDLE_SAMPLES,
                 active_hold_s=ADAPTIVE_ACTIVE_HOLD_SECONDS,
                 min_dwell_s=ADAPTIVE_MIN_DWELL_SECONDS,
@@ -317,7 +345,11 @@ class MiWiFiCoordinator(DataUpdateCoordinator):
     @property
     def adaptive_status(self) -> dict[str, Any]:
         """Return the adaptive polling state as a JSON-serialisable dict."""
-        return self._adaptive.snapshot.as_dict()
+        status = self._adaptive.snapshot.as_dict()
+        status["idle_traffic_bps"] = self._idle_traffic_bps
+        status["active_traffic_bps"] = self._active_traffic_bps
+        status["device_scan_interval"] = self._device_scan_interval
+        return status
 
     @property
     def adaptive_polling_enabled(self) -> bool:

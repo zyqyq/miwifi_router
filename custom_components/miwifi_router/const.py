@@ -17,7 +17,7 @@ CONF_TOTAL_UNIT = "total_unit"  # Optional: unit for total traffic sensors
 # readable unit automatically from the observed values.
 SPEED_UNIT_AUTO = "auto"
 SPEED_UNIT_OPTIONS: dict[str, str] = {
-    "auto": "自动（按数值自动选择易读单位，如 B/s、MB/s）",
+    "auto": "自动（在所选制式内按数值自动选择易读单位）",
     "B/s": "B/s（字节/秒）",
     "kB/s": "kB/s（千字节/秒，1000 进制）",
     "MB/s": "MB/s（兆字节/秒，1000 进制）",
@@ -36,7 +36,7 @@ SPEED_UNIT_OPTIONS: dict[str, str] = {
 # from the observed magnitude (totals keep that unit, they never switch).
 TOTAL_UNIT_AUTO = "auto"
 TOTAL_UNIT_OPTIONS: dict[str, str] = {
-    "auto": "自动（按数值自动选择易读单位，如 B、GB）",
+    "auto": "自动（在所选制式内按数值选一个稳定的易读单位）",
     "B": "B（字节）",
     "kB": "kB（千字节，1000 进制）",
     "MB": "MB（兆字节，1000 进制）",
@@ -88,19 +88,27 @@ TOTAL_UNIT_FACTORS: dict[str, float] = {
 }
 
 # ---------------------------------------------------------------------------
-# Unit mode: bit vs byte display family (v1.7.0+)
+# Unit family: bit vs byte display (v1.7.0+, split per sensor group in v1.8.0)
 # ---------------------------------------------------------------------------
 # The native unit of the byte-based sensors is ALWAYS raw bytes ("B/s" for
-# speeds, "B" for totals) so long-term statistics stay continuous. unit_mode
-# only selects the display family that Home Assistant suggests/converts to.
-CONF_UNIT_MODE = "unit_mode"
+# speeds, "B" for totals) so long-term statistics stay continuous. The unit
+# family only selects the display family that Home Assistant converts to, and
+# speeds and totals are configured independently.
+CONF_SPEED_UNIT_MODE = "speed_unit_mode"   # 实时网速显示单位制式：byte / bit
+CONF_TOTAL_UNIT_MODE = "total_unit_mode"   # 累计流量显示单位制式：byte / bit
 UNIT_MODE_BYTE = "byte"
 UNIT_MODE_BIT = "bit"
-DEFAULT_UNIT_MODE = UNIT_MODE_BYTE
+DEFAULT_SPEED_UNIT_MODE = UNIT_MODE_BYTE
+DEFAULT_TOTAL_UNIT_MODE = UNIT_MODE_BYTE
+
+# Legacy key used by v1.7.0 (a single family for both groups). It is read once
+# and migrated into the two keys above, then removed from the entry options.
+CONF_UNIT_MODE = "unit_mode"
+DEFAULT_UNIT_MODE = DEFAULT_SPEED_UNIT_MODE
 
 UNIT_MODE_OPTIONS: dict[str, str] = {
-    "byte": "字节（B/s、MB/s、GB…）",
-    "bit": "比特（bit/s、Mbit/s、Gbit…）",
+    "byte": "字节（B/s、kB/s、MB/s / B、kB、MB、GB…）",
+    "bit": "比特（bit/s、kbit/s、Mbit/s / bit、kbit、Mbit、Gbit…）",
 }
 
 # Default values
@@ -216,11 +224,20 @@ SENSOR_TYPES = {
 CONF_ADAPTIVE_POLLING = "adaptive_polling"          # 是否启用自适应轮询
 CONF_IDLE_SCAN_INTERVAL = "idle_scan_interval"      # 空闲模式轮询间隔（秒）
 CONF_ACTIVE_SCAN_INTERVAL = "active_scan_interval"  # 流量突增模式轮询间隔（秒）
+CONF_IDLE_TRAFFIC_KBPS = "idle_traffic_kbps"        # 空闲判定阈值（KB/s）
+CONF_ACTIVE_TRAFFIC_KBPS = "active_traffic_kbps"    # 进入活跃模式阈值（KB/s）
 
 # Defaults
 DEFAULT_ADAPTIVE_POLLING = True
 DEFAULT_IDLE_SCAN_INTERVAL = 60
 DEFAULT_ACTIVE_SCAN_INTERVAL = 5
+DEFAULT_IDLE_TRAFFIC_KBPS = 1.0     # 速率 ≤ 1 KB/s 视为空闲采样
+DEFAULT_ACTIVE_TRAFFIC_KBPS = 32.0  # 速率 ≥ 32 KB/s 视为流量突增（立即 active）
+
+# 轮询间隔与阈值的可填范围：UI 直接校验，而不是静默夹取
+MIN_POLL_INTERVAL = 5
+MAX_POLL_INTERVAL = 3600
+KBPS_TO_BPS = 1000.0
 
 # Hard limits and thresholds used by AdaptiveConfig
 ADAPTIVE_MIN_INTERVAL = 5                  # 任何模式下的最小轮询间隔（秒）

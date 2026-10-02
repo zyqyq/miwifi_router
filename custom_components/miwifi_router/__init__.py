@@ -7,6 +7,8 @@ via the Xiaomi MiWiFi router local API.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
+from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_SCAN_INTERVAL, Platform
@@ -15,19 +17,26 @@ from homeassistant.core import HomeAssistant
 from .api import MiWiFiAPIClient
 from .const import (
     CONF_ACTIVE_SCAN_INTERVAL,
+    CONF_ACTIVE_TRAFFIC_KBPS,
     CONF_ADAPTIVE_POLLING,
     CONF_DEVICE_SCAN_INTERVAL,
     CONF_FORCE_HASH_ALGO,
     CONF_IDLE_SCAN_INTERVAL,
+    CONF_IDLE_TRAFFIC_KBPS,
     CONF_SPEED_UNIT,
+    CONF_SPEED_UNIT_MODE,
     CONF_TOTAL_UNIT,
+    CONF_TOTAL_UNIT_MODE,
     CONF_UNIT_MODE,
     DEFAULT_ACTIVE_SCAN_INTERVAL,
+    DEFAULT_ACTIVE_TRAFFIC_KBPS,
     DEFAULT_ADAPTIVE_POLLING,
     DEFAULT_DEVICE_SCAN_INTERVAL,
     DEFAULT_IDLE_SCAN_INTERVAL,
+    DEFAULT_IDLE_TRAFFIC_KBPS,
     DEFAULT_SCAN_INTERVAL,
-    DEFAULT_UNIT_MODE,
+    DEFAULT_SPEED_UNIT_MODE,
+    DEFAULT_TOTAL_UNIT_MODE,
     DOMAIN,
     SPEED_UNIT_AUTO,
     TOTAL_UNIT_AUTO,
@@ -41,6 +50,19 @@ PLATFORMS = [Platform.SENSOR, Platform.DEVICE_TRACKER, Platform.BUTTON]
 # Obsolete option keys written by older versions that deleted sensor entities
 # when the units changed. They are dropped from the entry options on setup.
 _LEGACY_UNIT_MARKER_KEYS = ("_last_applied_speed_unit", "_last_applied_total_unit")
+
+
+def _unit_modes(options: Mapping[str, Any]) -> tuple[str, str]:
+    """Return the (speed, total) display unit family from the entry options.
+
+    v1.7.0 only had a single shared ``unit_mode`` key; it is still honoured for
+    both groups so an existing entry keeps its setting until the options are
+    saved again (``_migrate_legacy_options`` also copies it over explicitly).
+    """
+    legacy = options.get(CONF_UNIT_MODE)
+    speed = options.get(CONF_SPEED_UNIT_MODE) or legacy or DEFAULT_SPEED_UNIT_MODE
+    total = options.get(CONF_TOTAL_UNIT_MODE) or legacy or DEFAULT_TOTAL_UNIT_MODE
+    return str(speed), str(total)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -60,16 +82,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     active_scan_interval = entry.options.get(
         CONF_ACTIVE_SCAN_INTERVAL, DEFAULT_ACTIVE_SCAN_INTERVAL
     )
+    idle_traffic_kbps = entry.options.get(
+        CONF_IDLE_TRAFFIC_KBPS, DEFAULT_IDLE_TRAFFIC_KBPS
+    )
+    active_traffic_kbps = entry.options.get(
+        CONF_ACTIVE_TRAFFIC_KBPS, DEFAULT_ACTIVE_TRAFFIC_KBPS
+    )
     force_hash_algo = entry.options.get(CONF_FORCE_HASH_ALGO) or None
-    unit_mode = entry.options.get(CONF_UNIT_MODE, DEFAULT_UNIT_MODE) or DEFAULT_UNIT_MODE
     speed_unit = entry.options.get(CONF_SPEED_UNIT, SPEED_UNIT_AUTO) or SPEED_UNIT_AUTO
     total_unit = entry.options.get(CONF_TOTAL_UNIT, TOTAL_UNIT_AUTO) or TOTAL_UNIT_AUTO
+    speed_unit_mode, total_unit_mode = _unit_modes(entry.options)
 
     # Unit changes no longer need entity re-creation: the sensor native unit is
     # always the raw byte unit ("B/s" / "B") and Home Assistant converts it to
     # the suggested display unit, so history and statistics stay continuous.
     # Only the legacy bookkeeping options from the old behaviour are removed.
-    _drop_legacy_unit_markers(hass, entry)
+    _migrate_legacy_options(hass, entry)
 
     # Create API client with hass instance for non-blocking aiohttp session
     api = MiWiFiAPIClient(host, password, hass=hass, force_hash_algo=force_hash_algo)
@@ -83,6 +111,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         adaptive_polling=adaptive_polling,
         idle_scan_interval=idle_scan_interval,
         active_scan_interval=active_scan_interval,
+        idle_traffic_kbps=idle_traffic_kbps,
+        active_traffic_kbps=active_traffic_kbps,
     )
 
     # Store in hass.data
@@ -101,14 +131,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _LOGGER.info(
         "MiWiFi Router integration set up for %s (scan: %ds, device: %ds, "
         "adaptive_polling: %s, idle: %ds, active: %ds, "
-        "unit_mode: %s, speed_unit: %s, total_unit: %s)",
+        "idle_threshold: %s KB/s, active_threshold: %s KB/s, "
+        "speed_unit_mode: %s, total_unit_mode: %s, "
+        "speed_unit: %s, total_unit: %s)",
         host,
         scan_interval,
         device_scan_interval,
         adaptive_polling,
         idle_scan_interval,
         active_scan_interval,
-        unit_mode,
+        idle_traffic_kbps,
+        active_traffic_kbps,
+        speed_unit_mode,
+        total_unit_mode,
         speed_unit,
         total_unit,
     )
@@ -116,26 +151,47 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
-def _drop_legacy_unit_markers(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Remove obsolete "_last_applied_*_unit" option keys from the entry.
+def _migrate_legacy_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Clean up obsolete option keys and split the legacy shared unit mode.
 
-    Older versions stored these markers to decide when to delete sensor
-    entities after a unit change. Units no longer recreate entities, so the
-    markers are meaningless and get dropped once.
+    Two kinds of legacy keys exist:
 
-    The options are only written back when such a key is actually present, so
-    this cannot trigger a reload loop (the second setup finds nothing to drop),
-    and it never raises.
+    * ``_last_applied_speed_unit`` / ``_last_applied_total_unit`` — bookkeeping
+      of the old "delete the entities when the unit changes" behaviour.
+    * ``unit_mode`` — the v1.7.0 single display-unit family shared by speeds and
+      totals. It is copied into ``speed_unit_mode`` / ``total_unit_mode`` (when
+      those are not set yet) and then removed, so the user keeps the setting.
+
+    The options are only written back when something actually changed, so this
+    cannot trigger a reload loop, and it never raises.
     """
-    stale_keys = [key for key in _LEGACY_UNIT_MARKER_KEYS if key in entry.options]
-    if not stale_keys:
+    options = dict(entry.options)
+    changed = False
+
+    legacy_mode = options.get(CONF_UNIT_MODE)
+    if legacy_mode:
+        for key, default in (
+            (CONF_SPEED_UNIT_MODE, DEFAULT_SPEED_UNIT_MODE),
+            (CONF_TOTAL_UNIT_MODE, DEFAULT_TOTAL_UNIT_MODE),
+        ):
+            if not options.get(key):
+                options[key] = legacy_mode or default
+        del options[CONF_UNIT_MODE]
+        changed = True
+
+    for key in _LEGACY_UNIT_MARKER_KEYS:
+        if key in options:
+            del options[key]
+            changed = True
+
+    if not changed:
         return
 
-    options = {
-        key: value for key, value in entry.options.items() if key not in stale_keys
-    }
     _LOGGER.debug(
-        "MiWiFi Router: dropping obsolete option key(s): %s", ", ".join(stale_keys)
+        "MiWiFi Router: migrating legacy option keys (speed_unit_mode=%s, "
+        "total_unit_mode=%s)",
+        options.get(CONF_SPEED_UNIT_MODE),
+        options.get(CONF_TOTAL_UNIT_MODE),
     )
     hass.config_entries.async_update_entry(entry, options=options)
 

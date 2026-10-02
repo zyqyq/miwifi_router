@@ -2,20 +2,23 @@
   "config": {
     "step": {
       "user": {
-        "title": "MiWiFi Router",
+        "title": "小米路由器 (MiWiFi)",
         "description": "Set up the Xiaomi MiWiFi Router integration.\n\nℹ️ Speed/traffic units are display units and can be changed at any time: entities are never re-created and history is never lost.",
         "data": {
           "host": "Router IP address",
           "password": "Router admin password",
-          "scan_interval": "Realtime data polling interval (seconds, default 10)",
-          "device_scan_interval": "Device list polling interval (seconds, default 30)",
+          "scan_interval": "实时数据轮询间隔（秒，最小 5，默认 10）",
+          "device_scan_interval": "设备列表轮询间隔（秒，最小 5，默认 30）",
           "adaptive_polling": "Adaptive polling (adjust polling interval automatically)",
-          "idle_scan_interval": "Idle polling interval (seconds)",
-          "active_scan_interval": "Traffic burst polling interval (seconds)",
+          "idle_scan_interval": "空闲模式轮询间隔（秒，最小 5，默认 60）",
+          "active_scan_interval": "流量突增模式轮询间隔（秒，最小 5，默认 5）",
           "force_hash_algo": "Password hash algorithm (Auto-detect is recommended; manually specify only if login fails)",
-          "speed_unit": "Realtime speed sensor display unit (Auto = readable unit picked from the value)",
-          "total_unit": "Total traffic sensor display unit (Auto = readable unit picked from the value)",
-          "unit_mode": "Unit family (Byte: B/s, MB/s, GB... / Bit: bit/s, Mbit/s, Gbit...)"
+          "speed_unit": "实时网速显示单位（单位制式为「自动」时按数值自动选择易读单位）",
+          "total_unit": "累计流量显示单位（单位制式为「自动」时按数值自动选择稳定单位）",
+          "speed_unit_mode": "实时网速单位制式（字节 / 比特）",
+          "total_unit_mode": "累计流量单位制式（字节 / 比特）",
+          "idle_traffic_kbps": "空闲判定阈值（KB/s）：速率低于该值算空闲，连续多次后进入空闲模式",
+          "active_traffic_kbps": "进入活跃模式阈值（KB/s）：速率高于该值立即加快轮询，并保持 60 秒"
         }
       },
       "devices": {
@@ -38,19 +41,22 @@
   "options": {
     "step": {
       "init": {
-        "title": "MiWiFi Router Options",
+        "title": "小米路由器配置",
         "description": "Adjust polling intervals and select devices to add sensors for. Unchecked devices will have their sensors automatically removed after reload.\n\nℹ️ Speed/traffic units are display units: changing them never re-creates entities and never loses history or long-term statistics.",
         "data": {
-          "scan_interval": "Realtime data polling interval (seconds)",
-          "device_scan_interval": "Device list polling interval (seconds)",
+          "scan_interval": "实时数据轮询间隔（秒，最小 5，默认 10）",
+          "device_scan_interval": "设备列表轮询间隔（秒，最小 5，默认 30）",
           "adaptive_polling": "Adaptive polling (adjust polling interval automatically)",
-          "idle_scan_interval": "Idle polling interval (seconds)",
-          "active_scan_interval": "Traffic burst polling interval (seconds)",
+          "idle_scan_interval": "空闲模式轮询间隔（秒，最小 5，默认 60）",
+          "active_scan_interval": "流量突增模式轮询间隔（秒，最小 5，默认 5）",
           "tracked_devices": "Devices to add sensors for",
           "force_hash_algo": "Password hash algorithm (Auto-detect is recommended; manually specify only if login fails)",
-          "speed_unit": "Realtime speed sensor display unit (display only; changing it keeps history)",
-          "total_unit": "Total traffic sensor display unit (display only; changing it keeps history)",
-          "unit_mode": "Unit family (Byte: B/s, MB/s, GB... / Bit: bit/s, Mbit/s, Gbit...)"
+          "speed_unit": "实时网速显示单位（单位制式为「自动」时按数值自动选择易读单位）",
+          "total_unit": "累计流量显示单位（单位制式为「自动」时按数值自动选择稳定单位）",
+          "speed_unit_mode": "实时网速单位制式（字节 / 比特）",
+          "total_unit_mode": "累计流量单位制式（字节 / 比特）",
+          "idle_traffic_kbps": "空闲判定阈值（KB/s）：速率低于该值算空闲，连续多次后进入空闲模式",
+          "active_traffic_kbps": "进入活跃模式阈值（KB/s）：速率高于该值立即加快轮询，并保持 60 秒"
         }
       }
     }

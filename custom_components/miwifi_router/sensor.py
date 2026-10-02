@@ -64,10 +64,13 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from . import units
 from .const import (
     CONF_SPEED_UNIT,
+    CONF_SPEED_UNIT_MODE,
     CONF_TOTAL_UNIT,
+    CONF_TOTAL_UNIT_MODE,
     CONF_TRACKED_DEVICES,
     CONF_UNIT_MODE,
-    DEFAULT_UNIT_MODE,
+    DEFAULT_SPEED_UNIT_MODE,
+    DEFAULT_TOTAL_UNIT_MODE,
     DOMAIN,
     SPEED_UNIT_AUTO,
     TOTAL_UNIT_AUTO,
@@ -395,8 +398,20 @@ async def async_setup_entry(
 
     # Read user-selected unit mode and display units from options.
     # "auto" means auto-scaling; explicit units are only accepted when they
-    # belong to the selected family (see units.resolve_unit).
-    unit_mode = entry.options.get(CONF_UNIT_MODE, DEFAULT_UNIT_MODE) or DEFAULT_UNIT_MODE
+    # belong to the selected family (see units.resolve_unit). Speeds and totals
+    # have independent families; the legacy shared "unit_mode" key is honoured
+    # for both so entries created by v1.7.0 keep their setting.
+    legacy_mode = entry.options.get(CONF_UNIT_MODE)
+    speed_unit_mode = (
+        entry.options.get(CONF_SPEED_UNIT_MODE)
+        or legacy_mode
+        or DEFAULT_SPEED_UNIT_MODE
+    )
+    total_unit_mode = (
+        entry.options.get(CONF_TOTAL_UNIT_MODE)
+        or legacy_mode
+        or DEFAULT_TOTAL_UNIT_MODE
+    )
     speed_unit_cfg = entry.options.get(CONF_SPEED_UNIT, SPEED_UNIT_AUTO) or SPEED_UNIT_AUTO
     total_unit_cfg = entry.options.get(CONF_TOTAL_UNIT, TOTAL_UNIT_AUTO) or TOTAL_UNIT_AUTO
 
@@ -409,7 +424,7 @@ async def async_setup_entry(
             is_speed=True,
             icon="mdi:download",
             state_class=SensorStateClass.MEASUREMENT,
-            mode=unit_mode,
+            mode=speed_unit_mode,
             choice=speed_unit_cfg,
         ),
         _build_unit_description(
@@ -418,7 +433,7 @@ async def async_setup_entry(
             is_speed=True,
             icon="mdi:upload",
             state_class=SensorStateClass.MEASUREMENT,
-            mode=unit_mode,
+            mode=speed_unit_mode,
             choice=speed_unit_cfg,
         ),
         _build_unit_description(
@@ -427,7 +442,7 @@ async def async_setup_entry(
             is_speed=False,
             icon="mdi:download-circle",
             state_class=SensorStateClass.TOTAL_INCREASING,
-            mode=unit_mode,
+            mode=total_unit_mode,
             choice=total_unit_cfg,
         ),
         _build_unit_description(
@@ -436,7 +451,7 @@ async def async_setup_entry(
             is_speed=False,
             icon="mdi:upload-circle",
             state_class=SensorStateClass.TOTAL_INCREASING,
-            mode=unit_mode,
+            mode=total_unit_mode,
             choice=total_unit_cfg,
         ),
         (
@@ -483,7 +498,7 @@ async def async_setup_entry(
                 icon="mdi:speedometer",
                 state_class=SensorStateClass.MEASUREMENT,
             ),
-            _UnitResolver(is_speed=True, mode=unit_mode, choice=speed_unit_cfg),
+            _UnitResolver(is_speed=True, mode=speed_unit_mode, choice=speed_unit_cfg),
         ),
         (
             SensorEntityDescription(
@@ -526,7 +541,7 @@ async def async_setup_entry(
     # Set up per-device sensors for tracked devices
     device_sensor_manager = MiWiFiDeviceSensorManager(
         hass, coordinator, async_add_entities, entry, api.model, api.firmware,
-        unit_mode, speed_unit_cfg, total_unit_cfg,
+        speed_unit_mode, total_unit_mode, speed_unit_cfg, total_unit_cfg,
     )
 
     # Register a listener to update device sensors when coordinator data changes
@@ -736,7 +751,7 @@ class MiWiFiRouterSensor(
         """Return device info for the router."""
         return {
             "identifiers": {(DOMAIN, self.coordinator.api._host)},
-            "name": self._model or "MiWiFi Router",
+            "name": self._model or "小米路由器",
             "manufacturer": "Xiaomi",
             "model": self._model,
             "sw_version": self._firmware,
@@ -850,7 +865,8 @@ class MiWiFiDeviceSensorManager:
         entry: ConfigEntry,
         model: str,
         firmware: str,
-        unit_mode: str,
+        speed_unit_mode: str,
+        total_unit_mode: str,
         speed_unit_cfg: str,
         total_unit_cfg: str,
     ) -> None:
@@ -861,7 +877,8 @@ class MiWiFiDeviceSensorManager:
         self._entry = entry
         self._model = model
         self._firmware = firmware
-        self._unit_mode = unit_mode
+        self._speed_unit_mode = speed_unit_mode
+        self._total_unit_mode = total_unit_mode
         self._speed_unit_cfg = speed_unit_cfg
         self._total_unit_cfg = total_unit_cfg
         # MAC → {sensor_key: MiWiFiDeviceSensor}
@@ -895,7 +912,11 @@ class MiWiFiDeviceSensorManager:
                         is_speed=is_speed,
                         icon=icon,
                         state_class=state_class,
-                        mode=self._unit_mode,
+                        mode=(
+                            self._speed_unit_mode
+                            if is_speed
+                            else self._total_unit_mode
+                        ),
                         choice=(
                             self._speed_unit_cfg if is_speed else self._total_unit_cfg
                         ),
@@ -1009,7 +1030,7 @@ class MiWiFiDeviceSensor(
         """Return device info for the router."""
         return {
             "identifiers": {(DOMAIN, self.coordinator.api._host)},
-            "name": self._model or "MiWiFi Router",
+            "name": self._model or "小米路由器",
             "manufacturer": "Xiaomi",
             "model": self._model,
             "sw_version": self._firmware,
@@ -1089,7 +1110,7 @@ class MiWiFiPollingModeSensor(
         """Return device info for the router."""
         return {
             "identifiers": {(DOMAIN, self.coordinator.api._host)},
-            "name": self._model or "MiWiFi Router",
+            "name": self._model or "小米路由器",
             "manufacturer": "Xiaomi",
             "model": self._model,
             "sw_version": self._firmware,
@@ -1106,6 +1127,9 @@ class MiWiFiPollingModeSensor(
             "base_interval": status.get("base_interval"),
             "idle_interval": status.get("idle_interval"),
             "active_interval": status.get("active_interval"),
+            "device_scan_interval": status.get("device_scan_interval"),
+            "idle_traffic_bps": status.get("idle_traffic_bps"),
+            "active_traffic_bps": status.get("active_traffic_bps"),
             "reason": status.get("reason"),
             "idle_streak": status.get("idle_streak"),
             "transitions": status.get("transitions"),

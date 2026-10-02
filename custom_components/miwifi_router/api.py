@@ -1218,7 +1218,7 @@ class MiWiFiAPIClient:
     @property
     def model(self) -> str:
         """Return the router model name."""
-        return self._model or "MiWiFi Router"
+        return self._model or "小米路由器"
 
     @property
     def firmware(self) -> str:

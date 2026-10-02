@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 import voluptuous as vol
@@ -16,21 +17,30 @@ from homeassistant.helpers import config_validation as cv
 from .api import MiWiFiAPIClient, MiWiFiAuthError, MiWiFiConnectionError
 from .const import (
     CONF_ACTIVE_SCAN_INTERVAL,
+    CONF_ACTIVE_TRAFFIC_KBPS,
     CONF_ADAPTIVE_POLLING,
     CONF_DEVICE_SCAN_INTERVAL,
     CONF_FORCE_HASH_ALGO,
     CONF_IDLE_SCAN_INTERVAL,
+    CONF_IDLE_TRAFFIC_KBPS,
     CONF_SPEED_UNIT,
+    CONF_SPEED_UNIT_MODE,
     CONF_TOTAL_UNIT,
+    CONF_TOTAL_UNIT_MODE,
     CONF_TRACKED_DEVICES,
     CONF_UNIT_MODE,
     DEFAULT_ACTIVE_SCAN_INTERVAL,
+    DEFAULT_ACTIVE_TRAFFIC_KBPS,
     DEFAULT_ADAPTIVE_POLLING,
     DEFAULT_DEVICE_SCAN_INTERVAL,
     DEFAULT_IDLE_SCAN_INTERVAL,
+    DEFAULT_IDLE_TRAFFIC_KBPS,
     DEFAULT_SCAN_INTERVAL,
-    DEFAULT_UNIT_MODE,
+    DEFAULT_SPEED_UNIT_MODE,
+    DEFAULT_TOTAL_UNIT_MODE,
     DOMAIN,
+    MAX_POLL_INTERVAL,
+    MIN_POLL_INTERVAL,
     SPEED_UNIT_AUTO,
     SPEED_UNIT_OPTIONS,
     TOTAL_UNIT_AUTO,
@@ -39,6 +49,48 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+#: Display name used for flow titles, config entry titles and device names.
+INTEGRATION_TITLE = "小米路由器 (MiWiFi)"
+
+
+#: Interval fields are validated (not silently clamped) so the UI shows a
+#: real error instead of quietly storing something different.
+INTERVAL_VALIDATOR = vol.All(
+    vol.Coerce(int), vol.Range(min=MIN_POLL_INTERVAL, max=MAX_POLL_INTERVAL)
+)
+THRESHOLD_VALIDATOR = vol.All(vol.Coerce(float), vol.Range(min=0.0))
+
+
+def _clamp_interval(value: Any, default: int) -> int:
+    """Return a stored interval inside the allowed range (for form defaults)."""
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(MIN_POLL_INTERVAL, min(MAX_POLL_INTERVAL, number))
+
+
+def _resolved_unit_modes(
+    options: Mapping[str, Any],
+) -> tuple[str, str]:
+    """Return the (speed, total) unit family from options.
+
+    Entries created by v1.7.0 only have the shared ``unit_mode`` key; it is
+    honoured for both groups until the user saves the options again.
+    """
+    legacy = options.get(CONF_UNIT_MODE)
+    speed = (
+        options.get(CONF_SPEED_UNIT_MODE)
+        or legacy
+        or DEFAULT_SPEED_UNIT_MODE
+    )
+    total = (
+        options.get(CONF_TOTAL_UNIT_MODE)
+        or legacy
+        or DEFAULT_TOTAL_UNIT_MODE
+    )
+    return str(speed), str(total)
 
 
 class MiWiFiRouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -56,12 +108,15 @@ class MiWiFiRouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._adaptive_polling: bool = DEFAULT_ADAPTIVE_POLLING
         self._idle_scan_interval: int = DEFAULT_IDLE_SCAN_INTERVAL
         self._active_scan_interval: int = DEFAULT_ACTIVE_SCAN_INTERVAL
+        self._idle_traffic_kbps: float = DEFAULT_IDLE_TRAFFIC_KBPS
+        self._active_traffic_kbps: float = DEFAULT_ACTIVE_TRAFFIC_KBPS
         self._device_names: dict[str, str] = {}
         self._device_options: dict[str, str] = {}
         self._force_hash_algo: str | None = None
         self._speed_unit: str = SPEED_UNIT_AUTO
         self._total_unit: str = TOTAL_UNIT_AUTO
-        self._unit_mode: str = DEFAULT_UNIT_MODE
+        self._speed_unit_mode: str = DEFAULT_SPEED_UNIT_MODE
+        self._total_unit_mode: str = DEFAULT_TOTAL_UNIT_MODE
 
     @staticmethod
     @callback
@@ -93,10 +148,23 @@ class MiWiFiRouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             active_scan_interval = user_input.get(
                 CONF_ACTIVE_SCAN_INTERVAL, DEFAULT_ACTIVE_SCAN_INTERVAL
             )
+            idle_traffic_kbps = user_input.get(
+                CONF_IDLE_TRAFFIC_KBPS, DEFAULT_IDLE_TRAFFIC_KBPS
+            )
+            active_traffic_kbps = user_input.get(
+                CONF_ACTIVE_TRAFFIC_KBPS, DEFAULT_ACTIVE_TRAFFIC_KBPS
+            )
             force_hash_algo = user_input.get(CONF_FORCE_HASH_ALGO) or None
             speed_unit = user_input.get(CONF_SPEED_UNIT, SPEED_UNIT_AUTO) or SPEED_UNIT_AUTO
             total_unit = user_input.get(CONF_TOTAL_UNIT, TOTAL_UNIT_AUTO) or TOTAL_UNIT_AUTO
-            unit_mode = user_input.get(CONF_UNIT_MODE, DEFAULT_UNIT_MODE) or DEFAULT_UNIT_MODE
+            speed_unit_mode = (
+                user_input.get(CONF_SPEED_UNIT_MODE, DEFAULT_SPEED_UNIT_MODE)
+                or DEFAULT_SPEED_UNIT_MODE
+            )
+            total_unit_mode = (
+                user_input.get(CONF_TOTAL_UNIT_MODE, DEFAULT_TOTAL_UNIT_MODE)
+                or DEFAULT_TOTAL_UNIT_MODE
+            )
 
             # Check if already configured
             await self.async_set_unique_id(host)
@@ -117,10 +185,13 @@ class MiWiFiRouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._adaptive_polling = adaptive_polling
                 self._idle_scan_interval = idle_scan_interval
                 self._active_scan_interval = active_scan_interval
+                self._idle_traffic_kbps = float(idle_traffic_kbps)
+                self._active_traffic_kbps = float(active_traffic_kbps)
                 self._force_hash_algo = force_hash_algo
                 self._speed_unit = speed_unit
                 self._total_unit = total_unit
-                self._unit_mode = unit_mode
+                self._speed_unit_mode = speed_unit_mode
+                self._total_unit_mode = total_unit_mode
 
                 # Fetch device list for device selection step
                 try:
@@ -170,19 +241,25 @@ class MiWiFiRouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_PASSWORD): str,
                 vol.Optional(
                     CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL
-                ): int,
+                ): INTERVAL_VALIDATOR,
                 vol.Optional(
                     CONF_DEVICE_SCAN_INTERVAL, default=DEFAULT_DEVICE_SCAN_INTERVAL
-                ): int,
+                ): INTERVAL_VALIDATOR,
                 vol.Optional(
                     CONF_ADAPTIVE_POLLING, default=DEFAULT_ADAPTIVE_POLLING
                 ): bool,
                 vol.Optional(
                     CONF_IDLE_SCAN_INTERVAL, default=DEFAULT_IDLE_SCAN_INTERVAL
-                ): int,
+                ): INTERVAL_VALIDATOR,
                 vol.Optional(
                     CONF_ACTIVE_SCAN_INTERVAL, default=DEFAULT_ACTIVE_SCAN_INTERVAL
-                ): int,
+                ): INTERVAL_VALIDATOR,
+                vol.Optional(
+                    CONF_IDLE_TRAFFIC_KBPS, default=DEFAULT_IDLE_TRAFFIC_KBPS
+                ): THRESHOLD_VALIDATOR,
+                vol.Optional(
+                    CONF_ACTIVE_TRAFFIC_KBPS, default=DEFAULT_ACTIVE_TRAFFIC_KBPS
+                ): THRESHOLD_VALIDATOR,
                 vol.Optional(
                     CONF_FORCE_HASH_ALGO, default=""
                 ): vol.In({
@@ -197,7 +274,10 @@ class MiWiFiRouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_TOTAL_UNIT, default=TOTAL_UNIT_AUTO
                 ): vol.In(TOTAL_UNIT_OPTIONS),
                 vol.Optional(
-                    CONF_UNIT_MODE, default=DEFAULT_UNIT_MODE
+                    CONF_SPEED_UNIT_MODE, default=DEFAULT_SPEED_UNIT_MODE
+                ): vol.In(UNIT_MODE_OPTIONS),
+                vol.Optional(
+                    CONF_TOTAL_UNIT_MODE, default=DEFAULT_TOTAL_UNIT_MODE
                 ): vol.In(UNIT_MODE_OPTIONS),
             }
         )
@@ -233,12 +313,8 @@ class MiWiFiRouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self, tracked_devices: dict[str, str]
     ) -> FlowResult:
         """Create the config entry with tracked devices."""
-        # Get display name
-        api_display = self._host
-        # We can't easily get model here without another API call,
-        # so use host as fallback
         return self.async_create_entry(
-            title=f"MiWiFi Router ({self._host})",
+            title=f"{INTEGRATION_TITLE} ({self._host})",
             data={
                 CONF_HOST: self._host,
                 CONF_PASSWORD: self._password,
@@ -249,11 +325,14 @@ class MiWiFiRouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_ADAPTIVE_POLLING: self._adaptive_polling,
                 CONF_IDLE_SCAN_INTERVAL: self._idle_scan_interval,
                 CONF_ACTIVE_SCAN_INTERVAL: self._active_scan_interval,
+                CONF_IDLE_TRAFFIC_KBPS: self._idle_traffic_kbps,
+                CONF_ACTIVE_TRAFFIC_KBPS: self._active_traffic_kbps,
                 CONF_TRACKED_DEVICES: tracked_devices,
                 CONF_FORCE_HASH_ALGO: self._force_hash_algo or "",
                 CONF_SPEED_UNIT: self._speed_unit,
                 CONF_TOTAL_UNIT: self._total_unit,
-                CONF_UNIT_MODE: self._unit_mode,
+                CONF_SPEED_UNIT_MODE: self._speed_unit_mode,
+                CONF_TOTAL_UNIT_MODE: self._total_unit_mode,
             },
         )
 
@@ -281,7 +360,14 @@ class MiWiFiRouterOptionsFlow(config_entries.OptionsFlow):
 
             new_speed_unit = user_input.get(CONF_SPEED_UNIT, SPEED_UNIT_AUTO) or SPEED_UNIT_AUTO
             new_total_unit = user_input.get(CONF_TOTAL_UNIT, TOTAL_UNIT_AUTO) or TOTAL_UNIT_AUTO
-            new_unit_mode = user_input.get(CONF_UNIT_MODE, DEFAULT_UNIT_MODE) or DEFAULT_UNIT_MODE
+            new_speed_unit_mode = (
+                user_input.get(CONF_SPEED_UNIT_MODE, DEFAULT_SPEED_UNIT_MODE)
+                or DEFAULT_SPEED_UNIT_MODE
+            )
+            new_total_unit_mode = (
+                user_input.get(CONF_TOTAL_UNIT_MODE, DEFAULT_TOTAL_UNIT_MODE)
+                or DEFAULT_TOTAL_UNIT_MODE
+            )
 
             # Unit changes are applied directly: the sensor native unit is
             # always raw bytes, so changing the display unit no longer needs a
@@ -304,11 +390,22 @@ class MiWiFiRouterOptionsFlow(config_entries.OptionsFlow):
                     CONF_ACTIVE_SCAN_INTERVAL: user_input.get(
                         CONF_ACTIVE_SCAN_INTERVAL, DEFAULT_ACTIVE_SCAN_INTERVAL
                     ),
+                    CONF_IDLE_TRAFFIC_KBPS: float(
+                        user_input.get(
+                            CONF_IDLE_TRAFFIC_KBPS, DEFAULT_IDLE_TRAFFIC_KBPS
+                        )
+                    ),
+                    CONF_ACTIVE_TRAFFIC_KBPS: float(
+                        user_input.get(
+                            CONF_ACTIVE_TRAFFIC_KBPS, DEFAULT_ACTIVE_TRAFFIC_KBPS
+                        )
+                    ),
                     CONF_TRACKED_DEVICES: tracked_devices,
                     CONF_FORCE_HASH_ALGO: user_input.get(CONF_FORCE_HASH_ALGO, "") or "",
                     CONF_SPEED_UNIT: new_speed_unit,
                     CONF_TOTAL_UNIT: new_total_unit,
-                    CONF_UNIT_MODE: new_unit_mode,
+                    CONF_SPEED_UNIT_MODE: new_speed_unit_mode,
+                    CONF_TOTAL_UNIT_MODE: new_total_unit_mode,
                 },
             )
 
@@ -350,16 +447,22 @@ class MiWiFiRouterOptionsFlow(config_entries.OptionsFlow):
         schema_dict: dict[Any, Any] = {
             vol.Optional(
                 CONF_SCAN_INTERVAL,
-                default=self._config_entry.options.get(
-                    CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
+                default=_clamp_interval(
+                    self._config_entry.options.get(
+                        CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
+                    ),
+                    DEFAULT_SCAN_INTERVAL,
                 ),
-            ): int,
+            ): INTERVAL_VALIDATOR,
             vol.Optional(
                 CONF_DEVICE_SCAN_INTERVAL,
-                default=self._config_entry.options.get(
-                    CONF_DEVICE_SCAN_INTERVAL, DEFAULT_DEVICE_SCAN_INTERVAL
+                default=_clamp_interval(
+                    self._config_entry.options.get(
+                        CONF_DEVICE_SCAN_INTERVAL, DEFAULT_DEVICE_SCAN_INTERVAL
+                    ),
+                    DEFAULT_DEVICE_SCAN_INTERVAL,
                 ),
-            ): int,
+            ): INTERVAL_VALIDATOR,
             vol.Optional(
                 CONF_ADAPTIVE_POLLING,
                 default=self._config_entry.options.get(
@@ -368,16 +471,38 @@ class MiWiFiRouterOptionsFlow(config_entries.OptionsFlow):
             ): bool,
             vol.Optional(
                 CONF_IDLE_SCAN_INTERVAL,
-                default=self._config_entry.options.get(
-                    CONF_IDLE_SCAN_INTERVAL, DEFAULT_IDLE_SCAN_INTERVAL
+                default=_clamp_interval(
+                    self._config_entry.options.get(
+                        CONF_IDLE_SCAN_INTERVAL, DEFAULT_IDLE_SCAN_INTERVAL
+                    ),
+                    DEFAULT_IDLE_SCAN_INTERVAL,
                 ),
-            ): int,
+            ): INTERVAL_VALIDATOR,
             vol.Optional(
                 CONF_ACTIVE_SCAN_INTERVAL,
-                default=self._config_entry.options.get(
-                    CONF_ACTIVE_SCAN_INTERVAL, DEFAULT_ACTIVE_SCAN_INTERVAL
+                default=_clamp_interval(
+                    self._config_entry.options.get(
+                        CONF_ACTIVE_SCAN_INTERVAL, DEFAULT_ACTIVE_SCAN_INTERVAL
+                    ),
+                    DEFAULT_ACTIVE_SCAN_INTERVAL,
                 ),
-            ): int,
+            ): INTERVAL_VALIDATOR,
+            vol.Optional(
+                CONF_IDLE_TRAFFIC_KBPS,
+                default=float(
+                    self._config_entry.options.get(
+                        CONF_IDLE_TRAFFIC_KBPS, DEFAULT_IDLE_TRAFFIC_KBPS
+                    )
+                ),
+            ): THRESHOLD_VALIDATOR,
+            vol.Optional(
+                CONF_ACTIVE_TRAFFIC_KBPS,
+                default=float(
+                    self._config_entry.options.get(
+                        CONF_ACTIVE_TRAFFIC_KBPS, DEFAULT_ACTIVE_TRAFFIC_KBPS
+                    )
+                ),
+            ): THRESHOLD_VALIDATOR,
             vol.Optional(
                 CONF_FORCE_HASH_ALGO,
                 default=self._config_entry.options.get(CONF_FORCE_HASH_ALGO, ""),
@@ -395,8 +520,12 @@ class MiWiFiRouterOptionsFlow(config_entries.OptionsFlow):
                 default=self._config_entry.options.get(CONF_TOTAL_UNIT, TOTAL_UNIT_AUTO),
             ): vol.In(TOTAL_UNIT_OPTIONS),
             vol.Optional(
-                CONF_UNIT_MODE,
-                default=self._config_entry.options.get(CONF_UNIT_MODE, DEFAULT_UNIT_MODE),
+                CONF_SPEED_UNIT_MODE,
+                default=_resolved_unit_modes(self._config_entry.options)[0],
+            ): vol.In(UNIT_MODE_OPTIONS),
+            vol.Optional(
+                CONF_TOTAL_UNIT_MODE,
+                default=_resolved_unit_modes(self._config_entry.options)[1],
             ): vol.In(UNIT_MODE_OPTIONS),
         }
 
