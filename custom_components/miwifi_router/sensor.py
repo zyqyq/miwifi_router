@@ -82,6 +82,7 @@ _LOGGER = logging.getLogger(__name__)
 NATIVE_RATE_UNIT = UnitOfDataRate.BYTES_PER_SECOND  # "B/s"
 NATIVE_SIZE_UNIT = UnitOfInformation.BYTES  # "B"
 
+
 def _supports_suggested_unit() -> bool:
     """Return whether this Home Assistant accepts ``suggested_unit_of_measurement``.
 
@@ -97,15 +98,15 @@ def _supports_suggested_unit() -> bool:
             key="_suggested_unit_probe",
             suggested_unit_of_measurement=UnitOfDataRate.BYTES_PER_SECOND,
         )
-    except TypeError:
+    except Exception:  # noqa: BLE001 - any construction failure means unsupported
         return False
     return True
 
 
 # ``suggested_unit_of_measurement`` lets Home Assistant perform the native →
-# display conversion itself. When it is unavailable (very old cores) the sensor
-# platform falls back to the legacy behaviour of baking the display unit into
-# the native unit.
+# display conversion itself. Without it the integration keeps reporting raw
+# bytes; the display-unit options are then simply unavailable (native units are
+# never changed, that would invalidate the existing statistics).
 _HAS_SUGGESTED_UNIT = _supports_suggested_unit()
 
 # Display units live in the entity registry, keyed by the *sensor component*
@@ -195,12 +196,12 @@ def _round_value(value: float) -> float:
 
 
 class _UnitResolver:
-    """Resolve native/display units for a single byte-based sensor entity.
+    """Resolve the display unit for a single byte-based sensor entity.
 
-    Native values always stay raw bytes. The resolver only decides which
-    *display* unit should be suggested to Home Assistant, and (only on cores
-    without ``suggested_unit_of_measurement``) whether the reported value has to
-    be pre-converted to an explicit legacy unit.
+    Native values always stay raw bytes (``B/s`` / ``B``): the resolver only
+    decides which *display* unit is suggested to Home Assistant, which performs
+    the conversion itself. Native units are deliberately never touched, because
+    changing them would invalidate the existing ``total_increasing`` statistics.
     """
 
     def __init__(
@@ -209,7 +210,6 @@ class _UnitResolver:
         is_speed: bool,
         mode: str,
         choice: str,
-        legacy: bool = False,
     ) -> None:
         """Initialize the resolver for one entity."""
         self.is_speed = is_speed
@@ -218,7 +218,6 @@ class _UnitResolver:
             if mode in (units.UNIT_MODE_BYTE, units.UNIT_MODE_BIT)
             else units.UNIT_MODE_BYTE
         )
-        self.legacy = legacy
         # An explicit unit that does not belong to the selected family (e.g.
         # "MB/s" while unit_mode == "bit") resolves to None -> auto-scaling.
         self._explicit = units.resolve_unit(self.mode, choice, is_speed)
@@ -227,7 +226,7 @@ class _UnitResolver:
         # Totals keep one stable unit; it is picked once from the first
         # non-zero sample (never re-picked, they feed TOTAL_INCREASING stats).
         self._auto_locked = False
-        if not legacy and self._explicit is None:
+        if self._explicit is None:
             if is_speed:
                 self._scaler = units.AutoUnitScaler(is_speed=True, mode=self.mode)
             else:
@@ -237,9 +236,7 @@ class _UnitResolver:
 
     @property
     def native_unit(self) -> str:
-        """Return the unit of the reported value (raw bytes unless legacy)."""
-        if self.legacy and self._explicit:
-            return self._explicit
+        """Return the unit of the reported value (always raw bytes)."""
         return NATIVE_RATE_UNIT if self.is_speed else NATIVE_SIZE_UNIT
 
     @property
@@ -252,24 +249,32 @@ class _UnitResolver:
         """Return the suggested display unit (None = show the native unit)."""
         if self._explicit is not None:
             return self._explicit
-        if self.legacy:
-            return None
         if self._scaler is not None:
             return self._scaler.unit
         return self._fixed_auto
 
-    def process(self, raw_value: Any) -> tuple[float | int, str | None]:
-        """Observe a raw byte sample and return (value, display unit).
+    def adopt_display_unit(self, unit: str | None) -> bool:
+        """Adopt an already stored display unit for auto-scaled entities.
 
-        The returned value is the raw byte value (native unit) except in the
-        legacy fallback, where the value is pre-converted to the explicit unit.
+        Called at setup with the unit Home Assistant has in the entity registry,
+        so a reload/restart does not visibly drop back to the base unit before
+        the scaler has re-learned the traffic (and totals keep their unit).
+        Returns whether the stored unit was adopted.
         """
+        if unit is None:
+            return False
+        if self._scaler is not None:
+            return self._scaler.adopt(unit)
+        if self._explicit is None and not self._auto_locked:
+            if unit in units.auto_unit_ladder(self.mode, self.is_speed):
+                self._fixed_auto = unit
+                self._auto_locked = True
+                return True
+        return False
+
+    def process(self, raw_value: Any) -> tuple[float | int, str | None]:
+        """Observe a raw byte sample and return (raw value, display unit)."""
         raw = _as_number(raw_value)
-        if self.legacy:
-            if self._explicit:
-                converted = units.convert_from_bytes(raw, self._explicit)
-                return _round_value(converted), self._explicit
-            return raw, None
         if self._explicit is not None:
             return raw, self._explicit
         if self._scaler is not None:
@@ -308,12 +313,13 @@ def _build_unit_description(
     """Build a SensorEntityDescription for a byte-based sensor.
 
     ``native_unit_of_measurement`` is always the raw byte unit; the user-facing
-    display unit is passed as ``suggested_unit_of_measurement`` (or baked into
-    the native unit on cores that do not support suggestions).
+    display unit is passed as ``suggested_unit_of_measurement`` and converted by
+    Home Assistant. On cores that do not support suggestions the raw byte unit
+    is kept as well (the integration never changes a native unit, because that
+    would invalidate the existing long-term statistics); only the display unit
+    option is then unavailable.
     """
-    resolver = _UnitResolver(
-        is_speed=is_speed, mode=mode, choice=choice, legacy=not _HAS_SUGGESTED_UNIT
-    )
+    resolver = _UnitResolver(is_speed=is_speed, mode=mode, choice=choice)
     kwargs: dict[str, Any] = {
         "key": key,
         "translation_key": translation_key,
@@ -375,6 +381,17 @@ async def async_setup_entry(
     """Set up MiWiFi Router sensors from a config entry."""
     coordinator: MiWiFiCoordinator = hass.data[DOMAIN][entry.entry_id]
     api = coordinator.api
+
+    if not _HAS_SUGGESTED_UNIT:
+        _LOGGER.warning(
+            "This Home Assistant core does not support "
+            "suggested_unit_of_measurement: speed/total sensors stay in raw "
+            "bytes (%s / %s) and the display-unit options have no effect. "
+            "Native units are intentionally never changed, because that would "
+            "invalidate the existing long-term statistics.",
+            NATIVE_RATE_UNIT,
+            NATIVE_SIZE_UNIT,
+        )
 
     # Read user-selected unit mode and display units from options.
     # "auto" means auto-scaling; explicit units are only accepted when they
@@ -570,6 +587,10 @@ class _ByteUnitSensorMixin:
     async def async_added_to_hass(self) -> None:
         """Register the configured display unit with Home Assistant."""
         await super().async_added_to_hass()
+        # Adopt the unit Home Assistant already stored *before* writing ours, so
+        # a reload/restart never flashes the base unit. Adoption only happens
+        # here (at setup) — doing it on every update would fight the scaler.
+        self._adopt_stored_display_unit()
         self._sync_display_unit_to_registry()
 
     @callback
@@ -577,6 +598,32 @@ class _ByteUnitSensorMixin:
         """Return the display unit that should be used for this entity."""
         resolver = getattr(self, "_resolver", None)
         return resolver.display_unit if resolver is not None else None
+
+    @callback
+    def _adopt_stored_display_unit(self) -> None:
+        """Adopt the display unit already stored in the entity registry.
+
+        Auto-scaling rebuilds its scaler on every setup; without this the entity
+        would briefly fall back to ``B/s`` / ``bit/s`` (and totals would re-pick
+        their unit) even though Home Assistant already knows the readable unit.
+        """
+        if not _HAS_SUGGESTED_UNIT:
+            return
+        resolver = getattr(self, "_resolver", None)
+        if resolver is None:
+            return
+        entry = async_get_entity_registry(self.hass).async_get(self.entity_id)
+        if entry is None:
+            return
+        stored = (entry.options.get(_SENSOR_PRIVATE_OPTIONS_DOMAIN) or {}).get(
+            _SUGGESTED_UNIT_KEY
+        )
+        if stored and resolver.adopt_display_unit(stored):
+            _LOGGER.debug(
+                "Adopted stored display unit %s for %s (reload keeps the unit)",
+                stored,
+                self.entity_id,
+            )
 
     @callback
     def _sync_display_unit_to_registry(self) -> None:
@@ -599,7 +646,12 @@ class _ByteUnitSensorMixin:
         chosen by hand in the entity settings always wins, because Home Assistant
         reads ``options["sensor"]["unit_of_measurement"]`` first.
         """
-        unit = self._display_unit()
+        if not _HAS_SUGGESTED_UNIT:
+            return
+        resolver = getattr(self, "_resolver", None)
+        if resolver is None:
+            return
+        unit = resolver.display_unit
         if unit is None:
             return
         registry = async_get_entity_registry(self.hass)

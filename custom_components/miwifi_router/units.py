@@ -81,8 +81,11 @@ _AUTO_SIZE_UNITS_BIT = ("bit", "kbit", "Mbit", "Gbit")
 # Hysteresis band, expressed in *current unit* terms, and default dwell time.
 _HYSTERESIS_LOW = 0.5
 _HYSTERESIS_HIGH = 2000.0
-_DEFAULT_WINDOW = 60
-_DEFAULT_MIN_DWELL_S = 300.0
+# Number of recent samples used as the representative value (~30 s at the
+# default 5 s poll interval) and the minimum time before the unit may switch
+# *down* again.
+_DEFAULT_WINDOW = 6
+_DEFAULT_MIN_DWELL_S = 60.0
 
 
 def _normalise_mode(mode: str | None) -> str:
@@ -225,7 +228,8 @@ def human_readable_size(bytes_value: float, mode: str = UNIT_MODE_BYTE) -> str:
 class AutoUnitScaler:
     """Pick a readable display unit from observed raw values (bytes or B/s).
 
-    - keeps a rolling window of recent raw samples (default 60)
+    - keeps a rolling window of recent raw samples (default 6, i.e. roughly the
+      last 30 s at the default 5 s poll interval)
     - uses the peak of that window as the representative value and picks the
       unit where it lands in [1, 1000). Using the peak (instead of e.g. the
       mean/median) keeps the unit stable for bursty traffic: one busy sample
@@ -233,9 +237,11 @@ class AutoUnitScaler:
       flip-flopping between decades sample by sample.
     - hysteresis: only switches when the value leaves a wide band
       ([0.5, 2000) expressed in current-unit terms) to avoid flapping
-    - minimum dwell (default 300 s) between switches; when traffic goes idle
-      the unit decays back down once the window has drained and the dwell has
-      elapsed
+    - switching *up* to a bigger unit happens immediately (readability), while
+      switching *down* waits for ``min_dwell_s`` (default 60 s); a completely
+      idle window decays back to the family's base unit after the same dwell
+    - an already stored display unit can be adopted through :meth:`adopt`, so a
+      reload/restart continues with the unit the user last saw
     """
 
     def __init__(
@@ -265,6 +271,21 @@ class AutoUnitScaler:
         """Return the currently suggested display unit."""
         return self._unit
 
+    def adopt(self, unit: str | None) -> bool:
+        """Adopt an already stored display unit as the starting point.
+
+        Home Assistant keeps the display unit of an entity in the entity
+        registry. When the platform is set up again (reload/restart) the scaler
+        is re-created, and without adopting the stored unit the UI would fall
+        back to the base unit (``B/s`` / ``bit/s``) until the scaler has
+        re-learned the traffic. Returns ``True`` when ``unit`` belongs to this
+        scaler's family (and was therefore adopted).
+        """
+        if unit in auto_unit_ladder(self._mode, self._is_speed):
+            self._unit = unit
+            return True
+        return False
+
     @property
     def mode(self) -> str:
         """Return the unit family used by this scaler."""
@@ -283,6 +304,17 @@ class AutoUnitScaler:
             del self._samples[0 : len(self._samples) - self._window]
 
         representative = self._representative()
+        ladder = auto_unit_ladder(self._mode, self._is_speed)
+        base = ladder[0]
+
+        if representative <= 0:
+            # Completely idle: decay to the family's base unit, but only after
+            # the dwell so a short gap between bursts cannot flip the unit.
+            if self._unit != base and self._dwell_elapsed(timestamp):
+                self._unit = base
+                self._last_switch = timestamp
+            return self._unit
+
         suggested = pick_readable_unit(representative, self._mode, self._is_speed)
         if suggested == self._unit:
             return self._unit
@@ -290,7 +322,17 @@ class AutoUnitScaler:
         factor = factors_for(self._is_speed).get(self._unit) or 1.0
         current_value = abs(representative / factor)
         leaves_band = not (_HYSTERESIS_LOW <= current_value < _HYSTERESIS_HIGH)
-        if leaves_band and self._dwell_elapsed(timestamp):
+
+        try:
+            upward = ladder.index(suggested) > ladder.index(self._unit)
+        except ValueError:
+            upward = False
+
+        # Growing traffic may switch up immediately (readability matters), while
+        # switching down is the flicker-prone direction and keeps its dwell.
+        # Without this asymmetry a single quiet sample at startup would pin the
+        # display to "B/s"/"bit/s" for the whole dwell window.
+        if leaves_band and (upward or self._dwell_elapsed(timestamp)):
             self._unit = suggested
             self._last_switch = timestamp
         return self._unit
