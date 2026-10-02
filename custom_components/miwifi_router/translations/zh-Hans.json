@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "MiWiFi Router",
-        "description": "设置小米 MiWiFi 路由器集成。\n\nℹ️ 网速/流量单位选定后可在配置中修改，但修改会触发传感器实体重建，历史数据将丢失。",
+        "description": "设置小米 MiWiFi 路由器集成。\n\nℹ️ 网速/流量单位是显示单位，随时可在配置中修改：不会重建实体，也不会丢失历史数据。",
         "data": {
           "host": "路由器 IP 地址",
           "password": "路由器管理密码",
@@ -13,8 +13,9 @@
           "idle_scan_interval": "空闲轮询间隔（秒）",
           "active_scan_interval": "流量突增轮询间隔（秒）",
           "force_hash_algo": "密码哈希算法（一般选「自动检测」即可，登录失败再手动指定）",
-          "speed_unit": "实时网速传感器单位（「自动」表示用 B/s，不换算）",
-          "total_unit": "累计流量传感器单位（「自动」表示用 B，不换算）"
+          "speed_unit": "实时网速传感器显示单位（「自动」表示按数值自动选择易读单位）",
+          "total_unit": "累计流量传感器显示单位（「自动」表示按数值自动选择易读单位）",
+          "unit_mode": "单位制式（字节：B/s、MB/s、GB… / 比特：bit/s、Mbit/s、Gbit…）"
         }
       },
       "devices": {
@@ -38,7 +39,7 @@
     "step": {
       "init": {
         "title": "MiWiFi Router 配置",
-        "description": "调整轮询间隔，选择需添加传感器的设备。取消勾选的设备，其传感器会在重载后自动删除。\n\n⚠️ 修改网速/流量单位会触发传感器实体重建，对应实体的历史数据将丢失（提交后会弹出确认提示）。",
+        "description": "调整轮询间隔，选择需添加传感器的设备。取消勾选的设备，其传感器会在重载后自动删除。\n\nℹ️ 网速/流量单位是显示单位，可随时修改：不会重建实体，也不会丢失历史数据与长期统计。",
         "data": {
           "scan_interval": "实时数据轮询间隔（秒）",
           "device_scan_interval": "设备列表轮询间隔（秒）",
@@ -47,15 +48,9 @@
           "active_scan_interval": "流量突增轮询间隔（秒）",
           "tracked_devices": "需添加传感器的设备",
           "force_hash_algo": "密码哈希算法（一般选「自动检测」即可，登录失败再手动指定）",
-          "speed_unit": "实时网速传感器单位（修改后历史数据会丢失）",
-          "total_unit": "累计流量传感器单位（修改后历史数据会丢失）"
-        }
-      },
-      "confirm_unit_change": {
-        "title": "确认单位变更",
-        "description": "⚠️ 检测到单位变更\n\n{changes}\n\n修改单位会触发传感器实体重建，对应实体的历史状态数据将丢失（HA 限制：state_class 实体不能动态改 native_unit）。\n\n✅ 长期统计（statistics 表）不受影响\n✅ 能量面板继续工作\n✅ raw_b 属性始终保留原始字节数\n\n如果接受历史数据丢失，请勾选「确认」后提交。",
-        "data": {
-          "confirm": "我已了解历史数据会丢失，确认继续"
+          "speed_unit": "实时网速传感器显示单位（显示单位，修改不会丢失历史数据）",
+          "total_unit": "累计流量传感器显示单位（显示单位，修改不会丢失历史数据）",
+          "unit_mode": "单位制式（字节：B/s、MB/s、GB… / 比特：bit/s、Mbit/s、Gbit…）"
         }
       }
     }

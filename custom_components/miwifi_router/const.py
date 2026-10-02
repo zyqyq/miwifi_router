@@ -12,11 +12,12 @@ CONF_SPEED_UNIT = "speed_unit"  # Optional: unit for speed sensors
 CONF_TOTAL_UNIT = "total_unit"  # Optional: unit for total traffic sensors
 
 # Speed unit options (for CONF_SPEED_UNIT)
-# "auto" = use B/s as native unit (legacy v1.3.10 behavior, no conversion)
-# Other values = use that unit as native_unit, value will be converted from bytes
+# These are *display* unit choices now: the sensor native unit is always "B/s"
+# and Home Assistant converts the raw byte value for the UI. "auto" = pick a
+# readable unit automatically from the observed values.
 SPEED_UNIT_AUTO = "auto"
 SPEED_UNIT_OPTIONS: dict[str, str] = {
-    "auto": "自动（B/s，不换算）",
+    "auto": "自动（按数值自动选择易读单位，如 B/s、MB/s）",
     "B/s": "B/s（字节/秒）",
     "kB/s": "kB/s（千字节/秒，1000 进制）",
     "MB/s": "MB/s（兆字节/秒，1000 进制）",
@@ -24,13 +25,18 @@ SPEED_UNIT_OPTIONS: dict[str, str] = {
     "KiB/s": "KiB/s（千比字节/秒，1024 进制）",
     "MiB/s": "MiB/s（兆比字节/秒，1024 进制）",
     "GiB/s": "GiB/s（吉比字节/秒，1024 进制）",
+    "bit/s": "bit/s（比特/秒）",
+    "kbit/s": "kbit/s（千比特/秒）",
+    "Mbit/s": "Mbit/s（兆比特/秒）",
+    "Gbit/s": "Gbit/s（吉比特/秒）",
 }
 
 # Total unit options (for CONF_TOTAL_UNIT)
-# "auto" = use B as native unit (legacy v1.3.10 behavior, no conversion)
+# Display unit choices; native unit stays "B". "auto" = pick one readable unit
+# from the observed magnitude (totals keep that unit, they never switch).
 TOTAL_UNIT_AUTO = "auto"
 TOTAL_UNIT_OPTIONS: dict[str, str] = {
-    "auto": "自动（B，不换算）",
+    "auto": "自动（按数值自动选择易读单位，如 B、GB）",
     "B": "B（字节）",
     "kB": "kB（千字节，1000 进制）",
     "MB": "MB（兆字节，1000 进制）",
@@ -40,10 +46,17 @@ TOTAL_UNIT_OPTIONS: dict[str, str] = {
     "MiB": "MiB（兆比字节，1024 进制）",
     "GiB": "GiB（吉比字节，1024 进制）",
     "TiB": "TiB（太比字节，1024 进制）",
+    "bit": "bit（比特）",
+    "kbit": "kbit（千比特）",
+    "Mbit": "Mbit（兆比特）",
+    "Gbit": "Gbit（吉比特）",
 }
 
 # Unit conversion factors (number of bytes per unit)
-# 1000进制 (SI) and 1024进制 (IEC) both supported
+# 1000进制 (SI) and 1024进制 (IEC) both supported.
+# NOTE: units.py is the single source of truth for unit selection/conversion in
+# the sensor platform; these dicts are kept populated (and in sync) so existing
+# imports keep working.
 SPEED_UNIT_FACTORS: dict[str, float] = {
     "B/s": 1.0,
     "kB/s": 1_000.0,
@@ -52,6 +65,10 @@ SPEED_UNIT_FACTORS: dict[str, float] = {
     "KiB/s": 1024.0,
     "MiB/s": 1024.0 * 1024.0,
     "GiB/s": 1024.0 * 1024.0 * 1024.0,
+    "bit/s": 0.125,
+    "kbit/s": 125.0,
+    "Mbit/s": 125_000.0,
+    "Gbit/s": 125_000_000.0,
 }
 
 TOTAL_UNIT_FACTORS: dict[str, float] = {
@@ -64,6 +81,26 @@ TOTAL_UNIT_FACTORS: dict[str, float] = {
     "MiB": 1024.0 * 1024.0,
     "GiB": 1024.0 * 1024.0 * 1024.0,
     "TiB": 1024.0 * 1024.0 * 1024.0 * 1024.0,
+    "bit": 0.125,
+    "kbit": 125.0,
+    "Mbit": 125_000.0,
+    "Gbit": 125_000_000.0,
+}
+
+# ---------------------------------------------------------------------------
+# Unit mode: bit vs byte display family (v1.7.0+)
+# ---------------------------------------------------------------------------
+# The native unit of the byte-based sensors is ALWAYS raw bytes ("B/s" for
+# speeds, "B" for totals) so long-term statistics stay continuous. unit_mode
+# only selects the display family that Home Assistant suggests/converts to.
+CONF_UNIT_MODE = "unit_mode"
+UNIT_MODE_BYTE = "byte"
+UNIT_MODE_BIT = "bit"
+DEFAULT_UNIT_MODE = UNIT_MODE_BYTE
+
+UNIT_MODE_OPTIONS: dict[str, str] = {
+    "byte": "字节（B/s、MB/s、GB…）",
+    "bit": "比特（bit/s、Mbit/s、Gbit…）",
 }
 
 # Default values

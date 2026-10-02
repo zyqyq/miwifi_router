@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "MiWiFi Router",
-        "description": "Set up the Xiaomi MiWiFi Router integration.\n\nℹ️ Speed/traffic units can be changed later in Options, but changing them will trigger sensor entity re-creation and historical data will be lost.",
+        "description": "Set up the Xiaomi MiWiFi Router integration.\n\nℹ️ Speed/traffic units are display units and can be changed at any time: entities are never re-created and history is never lost.",
         "data": {
           "host": "Router IP address",
           "password": "Router admin password",
@@ -13,8 +13,9 @@
           "idle_scan_interval": "Idle polling interval (seconds)",
           "active_scan_interval": "Traffic burst polling interval (seconds)",
           "force_hash_algo": "Password hash algorithm (Auto-detect is recommended; manually specify only if login fails)",
-          "speed_unit": "Realtime speed sensor unit (Auto = B/s, no conversion)",
-          "total_unit": "Total traffic sensor unit (Auto = B, no conversion)"
+          "speed_unit": "Realtime speed sensor display unit (Auto = readable unit picked from the value)",
+          "total_unit": "Total traffic sensor display unit (Auto = readable unit picked from the value)",
+          "unit_mode": "Unit family (Byte: B/s, MB/s, GB... / Bit: bit/s, Mbit/s, Gbit...)"
         }
       },
       "devices": {
@@ -38,7 +39,7 @@
     "step": {
       "init": {
         "title": "MiWiFi Router Options",
-        "description": "Adjust polling intervals and select devices to add sensors for. Unchecked devices will have their sensors automatically removed after reload.\n\n⚠️ Changing speed/traffic unit triggers sensor entity re-creation; the historical data for those entities will be lost (a confirmation prompt will appear after submit).",
+        "description": "Adjust polling intervals and select devices to add sensors for. Unchecked devices will have their sensors automatically removed after reload.\n\nℹ️ Speed/traffic units are display units: changing them never re-creates entities and never loses history or long-term statistics.",
         "data": {
           "scan_interval": "Realtime data polling interval (seconds)",
           "device_scan_interval": "Device list polling interval (seconds)",
@@ -47,15 +48,9 @@
           "active_scan_interval": "Traffic burst polling interval (seconds)",
           "tracked_devices": "Devices to add sensors for",
           "force_hash_algo": "Password hash algorithm (Auto-detect is recommended; manually specify only if login fails)",
-          "speed_unit": "Realtime speed sensor unit (history data will be lost if changed)",
-          "total_unit": "Total traffic sensor unit (history data will be lost if changed)"
-        }
-      },
-      "confirm_unit_change": {
-        "title": "Confirm Unit Change",
-        "description": "⚠️ Unit change detected\n\n{changes}\n\nChanging the unit triggers sensor entity re-creation; the historical state data for those entities will be lost (HA limitation: state_class entities cannot dynamically change native_unit).\n\n✅ Long-term statistics (statistics table) are not affected\n✅ Energy Dashboard continues to work\n✅ raw_b attribute always preserves the original byte value\n\nIf you accept the history data loss, check \"Confirm\" and submit.",
-        "data": {
-          "confirm": "I understand the history data will be lost, confirm to continue"
+          "speed_unit": "Realtime speed sensor display unit (display only; changing it keeps history)",
+          "total_unit": "Total traffic sensor display unit (display only; changing it keeps history)",
+          "unit_mode": "Unit family (Byte: B/s, MB/s, GB... / Bit: bit/s, Mbit/s, Gbit...)"
         }
       }
     }
