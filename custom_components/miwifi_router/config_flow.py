@@ -20,13 +20,16 @@ from .const import (
     CONF_SPEED_UNIT,
     CONF_TOTAL_UNIT,
     CONF_TRACKED_DEVICES,
+    CONF_UNIT_MODE,
     DEFAULT_DEVICE_SCAN_INTERVAL,
     DEFAULT_SCAN_INTERVAL,
+    DEFAULT_UNIT_MODE,
     DOMAIN,
     SPEED_UNIT_AUTO,
     SPEED_UNIT_OPTIONS,
     TOTAL_UNIT_AUTO,
     TOTAL_UNIT_OPTIONS,
+    UNIT_MODE_OPTIONS,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -49,6 +52,7 @@ class MiWiFiRouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._force_hash_algo: str | None = None
         self._speed_unit: str = SPEED_UNIT_AUTO
         self._total_unit: str = TOTAL_UNIT_AUTO
+        self._unit_mode: str = DEFAULT_UNIT_MODE
 
     @staticmethod
     @callback
@@ -74,6 +78,7 @@ class MiWiFiRouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             force_hash_algo = user_input.get(CONF_FORCE_HASH_ALGO) or None
             speed_unit = user_input.get(CONF_SPEED_UNIT, SPEED_UNIT_AUTO) or SPEED_UNIT_AUTO
             total_unit = user_input.get(CONF_TOTAL_UNIT, TOTAL_UNIT_AUTO) or TOTAL_UNIT_AUTO
+            unit_mode = user_input.get(CONF_UNIT_MODE, DEFAULT_UNIT_MODE) or DEFAULT_UNIT_MODE
 
             # Check if already configured
             await self.async_set_unique_id(host)
@@ -94,6 +99,7 @@ class MiWiFiRouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._force_hash_algo = force_hash_algo
                 self._speed_unit = speed_unit
                 self._total_unit = total_unit
+                self._unit_mode = unit_mode
 
                 # Fetch device list for device selection step
                 try:
@@ -160,6 +166,9 @@ class MiWiFiRouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(
                     CONF_TOTAL_UNIT, default=TOTAL_UNIT_AUTO
                 ): vol.In(TOTAL_UNIT_OPTIONS),
+                vol.Optional(
+                    CONF_UNIT_MODE, default=DEFAULT_UNIT_MODE
+                ): vol.In(UNIT_MODE_OPTIONS),
             }
         )
 
@@ -211,6 +220,7 @@ class MiWiFiRouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_FORCE_HASH_ALGO: self._force_hash_algo or "",
                 CONF_SPEED_UNIT: self._speed_unit,
                 CONF_TOTAL_UNIT: self._total_unit,
+                CONF_UNIT_MODE: self._unit_mode,
             },
         )
 
@@ -222,8 +232,6 @@ class MiWiFiRouterOptionsFlow(config_entries.OptionsFlow):
         """Initialize options flow."""
         self._config_entry = config_entry
         self._device_names: dict[str, str] = {}
-        # Stored options from the init step; used by the confirm step
-        self._pending_options: dict[str, Any] | None = None
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -240,32 +248,27 @@ class MiWiFiRouterOptionsFlow(config_entries.OptionsFlow):
 
             new_speed_unit = user_input.get(CONF_SPEED_UNIT, SPEED_UNIT_AUTO) or SPEED_UNIT_AUTO
             new_total_unit = user_input.get(CONF_TOTAL_UNIT, TOTAL_UNIT_AUTO) or TOTAL_UNIT_AUTO
+            new_unit_mode = user_input.get(CONF_UNIT_MODE, DEFAULT_UNIT_MODE) or DEFAULT_UNIT_MODE
 
-            # Store pending options for the confirm step (or for direct save)
-            self._pending_options = {
-                CONF_SCAN_INTERVAL: user_input.get(
-                    CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
-                ),
-                CONF_DEVICE_SCAN_INTERVAL: user_input.get(
-                    CONF_DEVICE_SCAN_INTERVAL, DEFAULT_DEVICE_SCAN_INTERVAL
-                ),
-                CONF_TRACKED_DEVICES: tracked_devices,
-                CONF_FORCE_HASH_ALGO: user_input.get(CONF_FORCE_HASH_ALGO, "") or "",
-                CONF_SPEED_UNIT: new_speed_unit,
-                CONF_TOTAL_UNIT: new_total_unit,
-            }
-
-            # Check if speed_unit or total_unit changed — if so, show confirmation
-            # step warning about state history loss.
-            prev_speed = self._config_entry.options.get(CONF_SPEED_UNIT, SPEED_UNIT_AUTO) or SPEED_UNIT_AUTO
-            prev_total = self._config_entry.options.get(CONF_TOTAL_UNIT, TOTAL_UNIT_AUTO) or TOTAL_UNIT_AUTO
-
-            if new_speed_unit != prev_speed or new_total_unit != prev_total:
-                # Unit changed — require explicit confirmation
-                return await self.async_step_confirm_unit_change()
-
-            # No unit change — save directly
-            return self.async_create_entry(title="", data=self._pending_options)
+            # Unit changes are applied directly: the sensor native unit is
+            # always raw bytes, so changing the display unit no longer needs a
+            # confirmation step and never recreates entities or loses history.
+            return self.async_create_entry(
+                title="",
+                data={
+                    CONF_SCAN_INTERVAL: user_input.get(
+                        CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
+                    ),
+                    CONF_DEVICE_SCAN_INTERVAL: user_input.get(
+                        CONF_DEVICE_SCAN_INTERVAL, DEFAULT_DEVICE_SCAN_INTERVAL
+                    ),
+                    CONF_TRACKED_DEVICES: tracked_devices,
+                    CONF_FORCE_HASH_ALGO: user_input.get(CONF_FORCE_HASH_ALGO, "") or "",
+                    CONF_SPEED_UNIT: new_speed_unit,
+                    CONF_TOTAL_UNIT: new_total_unit,
+                    CONF_UNIT_MODE: new_unit_mode,
+                },
+            )
 
         # Build device multi-select options from coordinator data
         device_options: dict[str, str] = {}
@@ -331,6 +334,10 @@ class MiWiFiRouterOptionsFlow(config_entries.OptionsFlow):
                 CONF_TOTAL_UNIT,
                 default=self._config_entry.options.get(CONF_TOTAL_UNIT, TOTAL_UNIT_AUTO),
             ): vol.In(TOTAL_UNIT_OPTIONS),
+            vol.Optional(
+                CONF_UNIT_MODE,
+                default=self._config_entry.options.get(CONF_UNIT_MODE, DEFAULT_UNIT_MODE),
+            ): vol.In(UNIT_MODE_OPTIONS),
         }
 
         if device_options:
@@ -343,57 +350,3 @@ class MiWiFiRouterOptionsFlow(config_entries.OptionsFlow):
         schema = vol.Schema(schema_dict)
 
         return self.async_show_form(step_id="init", data_schema=schema)
-
-    async def async_step_confirm_unit_change(
-        self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
-        """Confirmation step shown when speed_unit or total_unit is changed.
-
-        Warns the user that changing units will trigger sensor entity
-        re-creation, which loses state history for those entities.
-        Long-term statistics and Energy Dashboard data are preserved.
-        """
-        if user_input is not None:
-            # User confirmed (or rejected)
-            if user_input.get("confirm"):
-                # User confirmed — save the pending options
-                return self.async_create_entry(title="", data=self._pending_options or {})
-            else:
-                # User rejected — go back to the init step
-                self._pending_options = None
-                return await self.async_step_init()
-
-        # Show the confirmation form
-        prev_speed = self._config_entry.options.get(CONF_SPEED_UNIT, SPEED_UNIT_AUTO) or SPEED_UNIT_AUTO
-        prev_total = self._config_entry.options.get(CONF_TOTAL_UNIT, TOTAL_UNIT_AUTO) or TOTAL_UNIT_AUTO
-        new_speed = (self._pending_options or {}).get(CONF_SPEED_UNIT, SPEED_UNIT_AUTO)
-        new_total = (self._pending_options or {}).get(CONF_TOTAL_UNIT, TOTAL_UNIT_AUTO)
-
-        speed_changed = new_speed != prev_speed
-        total_changed = new_total != prev_total
-
-        # Build the changes list text (will be substituted into the description
-        # template in strings.json via description_placeholders)
-        changes_lines: list[str] = []
-        if speed_changed:
-            changes_lines.append(f"• 网速单位：{prev_speed} → {new_speed}")
-        if total_changed:
-            changes_lines.append(f"• 流量单位：{prev_total} → {new_total}")
-        changes_text = "\n".join(changes_lines) if changes_lines else "（无变化）"
-
-        schema = vol.Schema({
-            vol.Required("confirm", default=False): bool,
-        })
-
-        # Note: async_show_form does NOT accept a `description` parameter.
-        # The description text comes from strings.json (key: options.step.
-        # confirm_unit_change.description). Dynamic content is injected via
-        # `description_placeholders`, which substitutes {placeholder} tokens
-        # in the strings.json description template.
-        return self.async_show_form(
-            step_id="confirm_unit_change",
-            data_schema=schema,
-            description_placeholders={
-                "changes": changes_text,
-            },
-        )
